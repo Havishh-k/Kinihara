@@ -115,13 +115,12 @@ st.markdown("""
     div[data-testid="stMetricValue"] {
         font-size: 2.2rem;
         font-weight: 600;
-        color: #0f172a;
     }
     
     div[data-testid="stMetricLabel"] {
         font-size: 1.05rem;
         font-weight: 500;
-        color: #64748b;
+        opacity: 0.85;
     }
     
     /* Rounded Inputs & Buttons */
