@@ -283,7 +283,12 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
         'absent': 'Absent '
     }
     
-    df_mapped = df.rename(columns=export_mapping)
+    # Only map if the target column does not already exist! 
+    # (prevents Duplicate columns when uploading XLSX files that already have 'Working Hrs.' etc)
+    safe_mapping = {k: v for k, v in export_mapping.items() if v not in df.columns}
+    
+    df_mapped = df.rename(columns=safe_mapping)
+    
     exact_columns = [
         'Name', 'Date', 'Month ', 'Year ', 'Day ', 'Check In', 
         'Check Out', 'Working Hrs.', 'Work Hours', 'OT', 'Remark ', 'Absent '
