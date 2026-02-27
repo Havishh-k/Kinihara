@@ -82,7 +82,7 @@ def check_pin(name, pin):
 # ==========================================
 # 2. Page Configuration & Setup
 # ==========================================
-st.set_page_config(page_title="Salary Calculator Portal", page_icon=":material/account_balance_wallet:", layout="wide")
+st.set_page_config(page_title="Salary Calculator Portal", page_icon=":material/account_balance_wallet:", layout="centered")
 
 st.markdown("""
 <style>
@@ -90,6 +90,20 @@ st.markdown("""
     
     html, body, [class*="css"] {
         font-family: 'Outfit', sans-serif !important;
+    }
+    
+    /* Center aligning main block like a standard SaaS website */
+    .block-container {
+        padding-top: 3rem !important;
+        padding-bottom: 3rem !important;
+        max-width: 800px;
+    }
+    
+    /* Make Metric container stack nicely on very small screens */
+    @media (max-width: 600px) {
+        div[data-testid="stMetricValue"] {
+            font-size: 1.8rem;
+        }
     }
     
     /* Customizing Tabs for a pill-like structure */
