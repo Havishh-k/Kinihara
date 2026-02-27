@@ -94,7 +94,7 @@ st.markdown("""
     
     /* Center aligning main block like a standard SaaS website */
     .block-container {
-        padding-top: 3rem !important;
+        padding-top: 1rem !important;
         padding-bottom: 3rem !important;
         max-width: 800px;
     }
