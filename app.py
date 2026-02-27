@@ -13,7 +13,6 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     
-    # Timesheet Data Table
     c.execute('''
         CREATE TABLE IF NOT EXISTS attendance (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,7 +30,6 @@ def init_db():
         )
     ''')
     
-    # Staff / Users Table
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,7 +39,6 @@ def init_db():
         )
     ''')
     
-    # Seed initial users if table is empty
     c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
         initial_users = [
@@ -58,7 +55,6 @@ def init_db():
 
 init_db()
 
-# DB Helper Functions
 def get_users():
     conn = sqlite3.connect(DB_NAME)
     df = pd.read_sql_query("SELECT name, pin, role FROM users", conn)
@@ -86,16 +82,67 @@ def check_pin(name, pin):
 # ==========================================
 # 2. Page Configuration & Setup
 # ==========================================
-st.set_page_config(page_title="Salary Calculator Portal", page_icon="💸", layout="wide")
+st.set_page_config(page_title="Salary Calculator Portal", page_icon=":material/account_balance_wallet:", layout="wide")
+
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Outfit', sans-serif !important;
+    }
+    
+    /* Customizing Tabs for a pill-like structure */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        padding-bottom: 10px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px;
+        padding: 10px 24px;
+        font-weight: 500;
+        background-color: transparent;
+        border: 1px solid #e2e8f0;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #f1f5f9;
+        border-bottom-color: transparent;
+    }
+
+    /* Beautifying Metric Cards */
+    div[data-testid="stMetricValue"] {
+        font-size: 2.2rem;
+        font-weight: 600;
+        color: #0f172a;
+    }
+    
+    div[data-testid="stMetricLabel"] {
+        font-size: 1.05rem;
+        font-weight: 500;
+        color: #64748b;
+    }
+    
+    /* Rounded Inputs & Buttons */
+    div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
+        border-radius: 8px;
+    }
+    
+    button {
+        border-radius: 8px !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 if "hr_logged_in" not in st.session_state:
     st.session_state.hr_logged_in = False
 if "hr_name" not in st.session_state:
     st.session_state.hr_name = ""
 
-st.title("💸 Dual-Interface Salary Portal")
+st.title(":material/account_balance_wallet: Dual-Interface Salary Portal")
 
-tab_staff, tab_hr = st.tabs(["🧑‍💼 Staff Portal", "🏢 HR Portal"])
+tab_staff, tab_hr = st.tabs([":material/badge: Staff Portal", ":material/admin_panel_settings: HR Portal"])
 
 # ==========================================
 # 3. Staff Portal (Attendance)
@@ -106,97 +153,96 @@ with tab_staff:
     
     staff_names = get_staff_names()
     
-    col_staff1, col_staff2 = st.columns([2, 1])
-    with col_staff1:
-        if staff_names:
-            employee_name = st.selectbox("Select Your Name", staff_names, key="staff_name_select")
-        else:
-            st.error("No staff found. HR needs to add staff.")
-            employee_name = None
-            
-    with col_staff2:
-        pin = st.text_input("Enter your PIN", type="password", max_chars=4, help="Ask HR for your PIN if you don't know it.")
-    
-    col_btn1, col_btn2 = st.columns(2)
-    
-    with col_btn1:
-        if st.button("Check In", type="primary", use_container_width=True) and employee_name:
-            valid, role = check_pin(employee_name, pin)
-            if not valid:
-                st.error("Invalid PIN. Please try again.")
+    with st.container(border=True):
+        col_staff1, col_staff2 = st.columns([2, 1])
+        with col_staff1:
+            if staff_names:
+                employee_name = st.selectbox("Select Your Name", staff_names, key="staff_name_select")
             else:
-                now = datetime.now()
-                current_time = now.strftime("%H:%M:%S")
-                date_val = now.strftime("%Y-%m-%d")    
-                month_val = now.strftime("%B")         
-                year_val = now.strftime("%Y")          
-                day_val = now.strftime("%A")           
+                st.error("No staff found. HR needs to add staff.")
+                employee_name = None
                 
-                conn = sqlite3.connect(DB_NAME)
-                c = conn.cursor()
-                
-                # "Forgot to Check Out" Edge Case
-                c.execute("SELECT id, date_val FROM attendance WHERE name=? AND check_out IS NULL AND date_val != ?", (employee_name, date_val))
-                open_shifts = c.fetchall()
-                for shift in open_shifts:
-                    c.execute("UPDATE attendance SET check_out = '18:30:00', remark = 'Auto-checkout (Forgot)' WHERE id=?", (shift[0],))
-                
-                # Verify if already checked in today
-                c.execute("SELECT id, check_in FROM attendance WHERE name=? AND date_val=?", (employee_name, date_val))
-                today_shift = c.fetchone()
-                
-                if today_shift and today_shift[1]:
-                    st.warning(f"You checked in today at {today_shift[1]}.")
+        with col_staff2:
+            pin = st.text_input("Enter your PIN", type="password", max_chars=4, help="Ask HR for your PIN if you don't know it.")
+        
+        col_btn1, col_btn2 = st.columns(2)
+        
+        with col_btn1:
+            if st.button(":material/login: Check In", type="primary", use_container_width=True) and employee_name:
+                valid, role = check_pin(employee_name, pin)
+                if not valid:
+                    st.error("Invalid PIN. Please try again.")
                 else:
-                    c.execute('''
-                        INSERT INTO attendance (name, date_val, month_val, year_val, day_val, check_in)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    ''', (employee_name, date_val, month_val, year_val, day_val, current_time))
-                    st.success(f"{employee_name} checked in successfully at {current_time}! Please remember to check out.")
-                
-                conn.commit()
-                conn.close()
-
-    with col_btn2:
-        if st.button("Check Out", type="secondary", use_container_width=True) and employee_name:
-            valid, role = check_pin(employee_name, pin)
-            if not valid:
-                st.error("Invalid PIN. Please try again.")
-            else:
-                now = datetime.now()
-                current_time = now.strftime("%H:%M:%S")
-                date_val = now.strftime("%Y-%m-%d")
-                
-                conn = sqlite3.connect(DB_NAME)
-                c = conn.cursor()
-                
-                c.execute("SELECT id, check_in, check_out FROM attendance WHERE name=? AND date_val=?", (employee_name, date_val))
-                today_shift = c.fetchone()
-                
-                if not today_shift:
-                    st.error("No Check-In record found for today. Please Check In first.")
-                elif today_shift[2]: 
-                    st.warning(f"You already checked out today at {today_shift[2]}.")
-                else:
-                    shift_id = today_shift[0]
-                    check_in_time_str = today_shift[1]
+                    now = datetime.now()
+                    current_time = now.strftime("%H:%M:%S")
+                    date_val = now.strftime("%Y-%m-%d")    
+                    month_val = now.strftime("%B")         
+                    year_val = now.strftime("%Y")          
+                    day_val = now.strftime("%A")           
                     
-                    fmt = "%H:%M:%S"
-                    try:
-                        t1 = datetime.strptime(check_in_time_str, fmt)
-                        t2 = datetime.strptime(current_time, fmt)
-                        tdelta = t2 - t1
-                        work_hours = tdelta.total_seconds() / 3600.0
-                        if work_hours < 0:
-                            work_hours += 24.0 
-                    except:
-                        work_hours = 0.0
+                    conn = sqlite3.connect(DB_NAME)
+                    c = conn.cursor()
+                    
+                    c.execute("SELECT id, date_val FROM attendance WHERE name=? AND check_out IS NULL AND date_val != ?", (employee_name, date_val))
+                    open_shifts = c.fetchall()
+                    for shift in open_shifts:
+                        c.execute("UPDATE attendance SET check_out = '18:30:00', remark = 'Auto-checkout (Forgot)' WHERE id=?", (shift[0],))
+                    
+                    c.execute("SELECT id, check_in FROM attendance WHERE name=? AND date_val=?", (employee_name, date_val))
+                    today_shift = c.fetchone()
+                    
+                    if today_shift and today_shift[1]:
+                        st.warning(f"You checked in today at {today_shift[1]}.")
+                    else:
+                        c.execute('''
+                            INSERT INTO attendance (name, date_val, month_val, year_val, day_val, check_in)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        ''', (employee_name, date_val, month_val, year_val, day_val, current_time))
+                        st.success(f"{employee_name} checked in successfully at {current_time}! Please remember to check out.")
+                    
+                    conn.commit()
+                    conn.close()
+
+        with col_btn2:
+            if st.button(":material/logout: Check Out", type="secondary", use_container_width=True) and employee_name:
+                valid, role = check_pin(employee_name, pin)
+                if not valid:
+                    st.error("Invalid PIN. Please try again.")
+                else:
+                    now = datetime.now()
+                    current_time = now.strftime("%H:%M:%S")
+                    date_val = now.strftime("%Y-%m-%d")
+                    
+                    conn = sqlite3.connect(DB_NAME)
+                    c = conn.cursor()
+                    
+                    c.execute("SELECT id, check_in, check_out FROM attendance WHERE name=? AND date_val=?", (employee_name, date_val))
+                    today_shift = c.fetchone()
+                    
+                    if not today_shift:
+                        st.error("No Check-In record found for today. Please Check In first.")
+                    elif today_shift[2]: 
+                        st.warning(f"You already checked out today at {today_shift[2]}.")
+                    else:
+                        shift_id = today_shift[0]
+                        check_in_time_str = today_shift[1]
                         
-                    c.execute("UPDATE attendance SET check_out=?, work_hours=? WHERE id=?", (current_time, work_hours, shift_id))
-                    st.success(f"{employee_name} checked out successfully at {current_time}! Work Hours Logged: {work_hours:.2f} hrs.")
-                
-                conn.commit()
-                conn.close()
+                        fmt = "%H:%M:%S"
+                        try:
+                            t1 = datetime.strptime(check_in_time_str, fmt)
+                            t2 = datetime.strptime(current_time, fmt)
+                            tdelta = t2 - t1
+                            work_hours = tdelta.total_seconds() / 3600.0
+                            if work_hours < 0:
+                                work_hours += 24.0 
+                        except:
+                            work_hours = 0.0
+                            
+                        c.execute("UPDATE attendance SET check_out=?, work_hours=? WHERE id=?", (current_time, work_hours, shift_id))
+                        st.success(f"{employee_name} checked out successfully at {current_time}! Work Hours Logged: {work_hours:.2f} hrs.")
+                    
+                    conn.commit()
+                    conn.close()
 
 # ==========================================
 # 4. Shared Salary Processing Function
@@ -208,7 +254,6 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
 
     st.success(f"Processing {len(df)} records for {target_employee}.")
     
-    # Pre-processing
     working_col = 'work_hours' if 'work_hours' in df.columns else 'Worked_Hours'
     ot_col = 'ot_hours' if 'ot_hours' in df.columns else 'OT_Hours'
     
@@ -247,27 +292,25 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
     total_working_hours = standard_hours_per_day * working_days
     per_hour_salary = monthly_salary / total_working_hours
     
-    # Deductions
     if actual_worked_hours < total_working_hours:
         missing_hours = total_working_hours - actual_worked_hours
         deduction = missing_hours * per_hour_salary
     else:
         deduction = 0.0
         
-    # OT and Final
     ot_pay = total_ot_hours * (per_hour_salary * ot_rate_multiplier)
     final_salary = (monthly_salary - deduction) + ot_pay
     
-    # View Results
-    col_m1, col_m2, col_m3 = st.columns(3)
-    with col_m1:
-        st.metric("Total Deductions", f"₹ {deduction:,.2f}")
-    with col_m2:
-        st.metric("Total OT Pay", f"₹ {ot_pay:,.2f}")
-    with col_m3:
-        st.metric("Final Payable Salary", f"₹ {final_salary:,.2f}")
+    # UI Card Wrapper for Metrics
+    with st.container(border=True):
+        col_m1, col_m2, col_m3 = st.columns(3)
+        with col_m1:
+            st.metric("Total Deductions", f"₹ {deduction:,.2f}")
+        with col_m2:
+            st.metric("Total OT Pay", f"₹ {ot_pay:,.2f}")
+        with col_m3:
+            st.metric("Final Payable Salary", f"₹ {final_salary:,.2f}")
         
-    # KINIHARA Formatting Export
     export_mapping = {
         'name': 'Name',
         'date_val': 'Date',
@@ -283,10 +326,7 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
         'absent': 'Absent '
     }
     
-    # Only map if the target column does not already exist! 
-    # (prevents Duplicate columns when uploading XLSX files that already have 'Working Hrs.' etc)
     safe_mapping = {k: v for k, v in export_mapping.items() if v not in df.columns}
-    
     df_mapped = df.rename(columns=safe_mapping)
     
     exact_columns = [
@@ -300,8 +340,8 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
             
     df_export = df_mapped[exact_columns]
     
-    st.markdown("### Preview (KINIHARA Structure)")
-    st.dataframe(df_export)
+    st.markdown("### Export Preview")
+    st.dataframe(df_export, use_container_width=True)
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -322,7 +362,7 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
     export_filename = f"KINIHARA_Timesheet_{target_employee}_{timestamp}.xlsx"
     
     st.download_button(
-        label=f"Download {target_employee} Timesheet (Excel)",
+        label=f":material/download: Download {target_employee} Timesheet",
         data=processed_data,
         file_name=export_filename,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -334,55 +374,53 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
 # ==========================================
 with tab_hr:
     if not st.session_state.hr_logged_in:
-        st.header("🔒 HR Security Portal")
-        st.warning("Only authorized HR personnel can access these tools.")
+        st.header(":material/lock: HR Security Portal")
+        st.markdown("Only authorized HR personnel can access these tools.")
         
-        # Only list users with role='hr'
-        conn = sqlite3.connect(DB_NAME)
-        c = conn.cursor()
-        c.execute("SELECT name FROM users WHERE role='hr'")
-        hr_names = [row[0] for row in c.fetchall()]
-        conn.close()
-        
-        if not hr_names:
-            st.error("No HR Admin found in database. Please initialize the DB properly.")
-        else:
-            hr_name = st.selectbox("Select HR Admin", hr_names, key="hr_name_select")
-            hr_pin = st.text_input("Enter HR PIN", type="password", key="hr_pin_input")
+        with st.container(border=True):
+            conn = sqlite3.connect(DB_NAME)
+            c = conn.cursor()
+            c.execute("SELECT name FROM users WHERE role='hr'")
+            hr_names = [row[0] for row in c.fetchall()]
+            conn.close()
             
-            if st.button("Login as HR", type="primary"):
-                valid, role = check_pin(hr_name, hr_pin)
-                if valid and role == "hr":
-                    st.session_state.hr_logged_in = True
-                    st.session_state.hr_name = hr_name
-                    st.rerun()
-                else:
-                    st.error("Access Denied. Invalid PIN.")
+            if not hr_names:
+                st.error("No HR Admin found in database. Please initialize the DB properly.")
+            else:
+                hr_name = st.selectbox("Select HR Admin", hr_names, key="hr_name_select")
+                hr_pin = st.text_input("Enter HR PIN", type="password", key="hr_pin_input")
+                
+                if st.button(":material/login: Login as HR", type="primary"):
+                    valid, role = check_pin(hr_name, hr_pin)
+                    if valid and role == "hr":
+                        st.session_state.hr_logged_in = True
+                        st.session_state.hr_name = hr_name
+                        st.rerun()
+                    else:
+                        st.error("Access Denied. Invalid PIN.")
     
     if st.session_state.hr_logged_in:
-        # ---- HR Sidebar Configuration ----
-        st.sidebar.header(f"⚙️ Welcome, {st.session_state.hr_name}")
-        if st.sidebar.button("Logout", type="secondary"):
+        st.sidebar.header(f":material/manage_accounts: Welcome, {st.session_state.hr_name}")
+        if st.sidebar.button(":material/logout: Logout", type="secondary"):
             st.session_state.hr_logged_in = False
             st.rerun()
             
         st.sidebar.divider()
         st.sidebar.subheader("Salary Variables")
-        monthly_salary = st.sidebar.number_input("Monthly Salary", min_value=0.0, step=1000.0, value=18000.0)
-        working_days = st.sidebar.number_input("Total Working Days / Month", min_value=1, max_value=31, value=26)
-        standard_hours_per_day = st.sidebar.number_input("Standard Hrs / Day", min_value=1.0, step=0.5, value=8.0)
-        ot_rate_multiplier = st.sidebar.selectbox("OT Rate Multiplier", options=[1.5, 2.0])
+        with st.sidebar.container(border=True):
+            monthly_salary = st.number_input("Monthly Salary", min_value=0.0, step=1000.0, value=18000.0)
+            working_days = st.number_input("Total Working Days / Month", min_value=1, max_value=31, value=26)
+            standard_hours_per_day = st.number_input("Standard Hrs / Day", min_value=1.0, step=0.5, value=8.0)
+            ot_rate_multiplier = st.selectbox("OT Rate Multiplier", options=[1.5, 2.0])
         
-        # ---- HR Main Area ----
-        st.header("HR Management Dashboard")
+        st.header(":material/dashboard: HR Management Dashboard")
 
-        hr_sub_tabs = st.tabs(["📊 Salary Calculations", "👥 Staff Management", "📁 Manual Overrides"])
+        hr_sub_tabs = st.tabs([":material/analytics: Salary Calculations", ":material/groups: Staff Management", ":material/folder_open: Manual Overrides"])
         
-        # 5.1 Salary Calculations (Reactive & Editable)
         with hr_sub_tabs[0]:
             st.subheader("Live Employee Calculations")
             st.markdown("Edit Check In/Out fields below to correct mistakes. Click **Save Edits** to recalculate.")
-            target_employee = st.selectbox("Select Employee to Calculate for", staff_names)
+            target_employee = st.selectbox("Select Employee to Calculate", staff_names)
             
             conn = sqlite3.connect(DB_NAME)
             query = "SELECT id, date_val, check_in, check_out, remark FROM attendance WHERE name=?"
@@ -392,11 +430,10 @@ with tab_hr:
             if df.empty:
                  st.info(f"No attendance records found to process.")
             else:
-                # Interactive Editor
                 edited_df = st.data_editor(
                     df,
                     column_config={
-                        "id": None, # Hide ID
+                        "id": None,
                         "date_val": st.column_config.TextColumn("Date", disabled=True),
                         "check_in": st.column_config.TextColumn("Check In (HH:MM:SS)"),
                         "check_out": st.column_config.TextColumn("Check Out (HH:MM:SS)"),
@@ -407,8 +444,7 @@ with tab_hr:
                     use_container_width=True
                 )
                 
-                # Save & Recalculate button
-                if st.button("Save Edits & Compute Salary", type="primary"):
+                if st.button(":material/save: Save Edits & Compute Salary", type="primary"):
                     conn = sqlite3.connect(DB_NAME)
                     c = conn.cursor()
                     
@@ -418,7 +454,6 @@ with tab_hr:
                         new_co = row['check_out']
                         new_remark = row['remark']
                         
-                        # Recalculate work_hours if both exist
                         work_hours = 0.0
                         if pd.notna(new_ci) and pd.notna(new_co) and new_ci != "" and new_co != "":
                             fmt = "%H:%M:%S"
@@ -440,7 +475,6 @@ with tab_hr:
                     
                     conn.commit()
                     
-                    # Fetch fully updated table structure
                     query_full = "SELECT * FROM attendance WHERE name=?"
                     full_df = pd.read_sql_query(query_full, conn, params=(target_employee,))
                     conn.close()
@@ -450,59 +484,59 @@ with tab_hr:
                 else:
                     st.info("Click 'Save Edits & Compute Salary' to view the final payload slip and numbers.")
 
-        # 5.2 Staff Management
         with hr_sub_tabs[1]:
             st.subheader("Manage Staff & PINs")
             users_df = get_users()
-            st.dataframe(users_df, use_container_width=True)
+            st.dataframe(users_df, use_container_width=True, hide_index=True)
             
-            st.markdown("#### Add or Update User")
-            with st.form("add_user_form", clear_on_submit=True):
-                col_f1, col_f2, col_f3 = st.columns(3)
-                with col_f1: new_name = st.text_input("Exact Name")
-                with col_f2: new_pin = st.text_input("PIN (4 digits)", max_chars=4)
-                with col_f3: new_role = st.selectbox("Role", ["staff", "hr"])
-                submit_user = st.form_submit_button("Save User")
-                
-                if submit_user:
-                    if len(new_pin) != 4:
-                        st.error("PIN must be exactly 4 digits.")
-                    elif not new_name:
-                        st.error("Name cannot be empty.")
-                    else:
-                        conn = sqlite3.connect(DB_NAME)
-                        c = conn.cursor()
-                        c.execute("SELECT id FROM users WHERE name=?", (new_name,))
-                        ext = c.fetchone()
-                        if ext:
-                            c.execute("UPDATE users SET pin=?, role=? WHERE name=?", (new_pin, new_role, new_name))
-                            st.success(f"Updated {new_name}'s PIN and Role.")
+            with st.container(border=True):
+                st.markdown("#### Add or Update User")
+                with st.form("add_user_form", clear_on_submit=True):
+                    col_f1, col_f2, col_f3 = st.columns(3)
+                    with col_f1: new_name = st.text_input("Exact Name")
+                    with col_f2: new_pin = st.text_input("PIN (4 digits)", max_chars=4)
+                    with col_f3: new_role = st.selectbox("Role", ["staff", "hr"])
+                    submit_user = st.form_submit_button("Save User")
+                    
+                    if submit_user:
+                        if len(new_pin) != 4:
+                            st.error("PIN must be exactly 4 digits.")
+                        elif not new_name:
+                            st.error("Name cannot be empty.")
                         else:
-                            c.execute("INSERT INTO users (name, pin, role) VALUES (?, ?, ?)", (new_name, new_pin, new_role))
-                            st.success(f"Added {new_name} as {new_role}.")
-                        conn.commit()
-                        conn.close()
-                        st.rerun()
-                        
-            st.markdown("#### Remove Staff")
-            with st.form("delete_user_form"):
-                del_name = st.selectbox("Select User to remove", staff_names)
-                del_submit = st.form_submit_button("Remove User")
-                if del_submit:
-                    if del_name == st.session_state.hr_name:
-                        st.error("You cannot delete your own account while logged in!")
-                    else:
-                        conn = sqlite3.connect(DB_NAME)
-                        c = conn.cursor()
-                        c.execute("DELETE FROM users WHERE name=?", (del_name,))
-                        conn.commit()
-                        conn.close()
-                        st.success(f"Removed user {del_name}")
-                        st.rerun()
+                            conn = sqlite3.connect(DB_NAME)
+                            c = conn.cursor()
+                            c.execute("SELECT id FROM users WHERE name=?", (new_name,))
+                            ext = c.fetchone()
+                            if ext:
+                                c.execute("UPDATE users SET pin=?, role=? WHERE name=?", (new_pin, new_role, new_name))
+                                st.success(f"Updated {new_name}'s PIN and Role.")
+                            else:
+                                c.execute("INSERT INTO users (name, pin, role) VALUES (?, ?, ?)", (new_name, new_pin, new_role))
+                                st.success(f"Added {new_name} as {new_role}.")
+                            conn.commit()
+                            conn.close()
+                            st.rerun()
+                            
+            with st.container(border=True):
+                st.markdown("#### Remove Staff")
+                with st.form("delete_user_form"):
+                    del_name = st.selectbox("Select User to remove", staff_names)
+                    del_submit = st.form_submit_button("Remove User")
+                    if del_submit:
+                        if del_name == st.session_state.hr_name:
+                            st.error("You cannot delete your own account while logged in!")
+                        else:
+                            conn = sqlite3.connect(DB_NAME)
+                            c = conn.cursor()
+                            c.execute("DELETE FROM users WHERE name=?", (del_name,))
+                            conn.commit()
+                            conn.close()
+                            st.success(f"Removed user {del_name}")
+                            st.rerun()
 
-        # 5.3 Legacy File Uploader
         with hr_sub_tabs[2]:
-            st.subheader("Manual Timesheet Override (CSV/XLSX)")
+            st.subheader("Manual Timesheet Override")
             st.markdown("Run calculations securely on external files without updating the live database.")
             uploaded_file = st.file_uploader("Upload External Timesheet", type=["csv", "xlsx"])
             if uploaded_file is not None:
