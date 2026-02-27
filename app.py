@@ -40,7 +40,8 @@ def init_db():
             role TEXT,
             monthly_salary REAL DEFAULT 18000.0,
             working_days INTEGER DEFAULT 26,
-            standard_hours REAL DEFAULT 8.0
+            standard_hours REAL DEFAULT 8.0,
+            security_deposit REAL DEFAULT 0.0
         )
     ''')
     
@@ -48,6 +49,11 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN monthly_salary REAL DEFAULT 18000.0")
         c.execute("ALTER TABLE users ADD COLUMN working_days INTEGER DEFAULT 26")
         c.execute("ALTER TABLE users ADD COLUMN standard_hours REAL DEFAULT 8.0")
+    except sqlite3.OperationalError:
+        pass
+        
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN security_deposit REAL DEFAULT 0.0")
     except sqlite3.OperationalError:
         pass
         
@@ -69,7 +75,7 @@ init_db()
 
 def get_users():
     conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query("SELECT name, pin, role, monthly_salary, working_days, standard_hours FROM users", conn)
+    df = pd.read_sql_query("SELECT name, pin, role, monthly_salary, working_days, standard_hours, security_deposit FROM users", conn)
     conn.close()
     return df
 
@@ -274,7 +280,7 @@ with tab_staff:
 # ==========================================
 # 4. Shared Salary Processing Function
 # ==========================================
-def render_salary_dashboard(df, target_employee, monthly_salary, working_days, standard_hours_per_day):
+def render_salary_dashboard(df, target_employee, monthly_salary, working_days, standard_hours_per_day, security_deposit=0.0):
     if df.empty:
         st.info(f"No attendance records found to process.")
         return
@@ -321,21 +327,42 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
     
     if actual_worked_hours < total_working_hours:
         missing_hours = total_working_hours - actual_worked_hours
-        deduction = missing_hours * per_hour_salary
+        leave_deduction = missing_hours * per_hour_salary
     else:
-        deduction = 0.0
+        leave_deduction = 0.0
+        
+    # Professional Tax (PT) Calculation
+    # PT is 200 every month, except February where it is 300
+    pt_deduction = 0.0
+    if not df.empty:
+        first_month_recorded = df['month_val'].iloc[0].strip().lower()
+        if first_month_recorded == "february":
+            pt_deduction = 300.0
+        else:
+            pt_deduction = 200.0
+
+    # Security Deposit Calculation
+    # (Base Security Deposit / Standard Working Days) * Days Present
+    days_present = df['date_val'].nunique()
+    sd_deduction = 0.0
+    if working_days > 0:
+        sd_deduction = (security_deposit / working_days) * days_present
+        
+    total_deductions = leave_deduction + pt_deduction + sd_deduction
         
     ot_pay = total_ot_hours * 50.0
-    final_salary = (monthly_salary - deduction) + ot_pay
+    final_salary = (monthly_salary - total_deductions) + ot_pay
     
     # UI Card Wrapper for Metrics
     with st.container(border=True):
-        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         with col_m1:
-            st.metric("Total Deductions", f"₹ {deduction:,.2f}")
+            st.metric("Leave Deduct.", f"₹ {leave_deduction:,.2f}")
         with col_m2:
-            st.metric("Total OT Pay", f"₹ {ot_pay:,.2f}")
+            st.metric("PT + SD Deduct.", f"₹ {(pt_deduction + sd_deduction):,.2f}")
         with col_m3:
+            st.metric("Total OT Pay", f"₹ {ot_pay:,.2f}")
+        with col_m4:
             st.metric("Final Payable Salary", f"₹ {final_salary:,.2f}")
         
     export_mapping = {
@@ -379,7 +406,10 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
             "Actual Worked Hours": actual_worked_hours,
             "Total OT Hours": total_ot_hours,
             "Total OT Pay": ot_pay,
-            "Total Deductions": deduction,
+            "Leave Deductions": leave_deduction,
+            "Professional Tax (PT)": pt_deduction,
+            "Security Deposit (SD)": sd_deduction,
+            "Total Deductions": total_deductions,
             "Final Payable Salary": final_salary
         }])
         summary_df.to_excel(writer, index=False, sheet_name='Summary')
@@ -456,10 +486,10 @@ with tab_hr:
             
             conn = sqlite3.connect(DB_NAME)
             c = conn.cursor()
-            c.execute("SELECT monthly_salary, working_days, standard_hours FROM users WHERE name=?", (target_employee,))
+            c.execute("SELECT monthly_salary, working_days, standard_hours, security_deposit FROM users WHERE name=?", (target_employee,))
             user_vars = c.fetchone()
-            if not user_vars: user_vars = (18000.0, 26, 8.0)
-            monthly_salary, working_days, standard_hours_per_day = user_vars
+            if not user_vars: user_vars = (18000.0, 26, 8.0, 0.0)
+            monthly_salary, working_days, standard_hours_per_day, security_deposit = user_vars
             
             query = "SELECT id, date_val, check_in, check_out, remark FROM attendance WHERE name=? AND month_val=? AND year_val=?"
             df = pd.read_sql_query(query, conn, params=(target_employee, target_month, target_year))
@@ -518,7 +548,7 @@ with tab_hr:
                     conn.close()
                     
                     st.success("Changes saved! Below are the recalculated salary metrics:")
-                    render_salary_dashboard(full_df, target_employee, monthly_salary, working_days, standard_hours_per_day)
+                    render_salary_dashboard(full_df, target_employee, monthly_salary, working_days, standard_hours_per_day, security_deposit)
                 else:
                     st.info("Click 'Save Edits & Compute Salary' to view the final payload slip and numbers.")
 
@@ -535,10 +565,13 @@ with tab_hr:
                     with col_f2: new_pin = st.text_input("PIN (4 digits)", max_chars=4)
                     with col_f3: new_role = st.selectbox("Role", ["staff", "hr"])
                     
-                    col_v1, col_v2, col_v3 = st.columns(3)
+                    col_v1, col_v2 = st.columns(2)
                     with col_v1: new_salary = st.number_input("Monthly Salary", value=18000.0, step=1000.0)
                     with col_v2: new_days = st.number_input("Working Days", value=26)
+                    
+                    col_v3, col_v4 = st.columns(2)
                     with col_v3: new_hrs = st.number_input("Standard Hrs/Day", value=8.0, step=0.5)
+                    with col_v4: new_sd = st.number_input("Base Security Deposit", value=0.0, step=500.0)
                     
                     submit_user = st.form_submit_button("Save User")
                     
@@ -553,10 +586,10 @@ with tab_hr:
                             c.execute("SELECT id FROM users WHERE name=?", (new_name,))
                             ext = c.fetchone()
                             if ext:
-                                c.execute("UPDATE users SET pin=?, role=?, monthly_salary=?, working_days=?, standard_hours=? WHERE name=?", (new_pin, new_role, new_salary, new_days, new_hrs, new_name))
+                                c.execute("UPDATE users SET pin=?, role=?, monthly_salary=?, working_days=?, standard_hours=?, security_deposit=? WHERE name=?", (new_pin, new_role, new_salary, new_days, new_hrs, new_sd, new_name))
                                 st.success(f"Updated {new_name}'s Profile Settings.")
                             else:
-                                c.execute("INSERT INTO users (name, pin, role, monthly_salary, working_days, standard_hours) VALUES (?, ?, ?, ?, ?, ?)", (new_name, new_pin, new_role, new_salary, new_days, new_hrs))
+                                c.execute("INSERT INTO users (name, pin, role, monthly_salary, working_days, standard_hours, security_deposit) VALUES (?, ?, ?, ?, ?, ?, ?)", (new_name, new_pin, new_role, new_salary, new_days, new_hrs, new_sd))
                                 st.success(f"Added {new_name} as {new_role}.")
                             conn.commit()
                             conn.close()
@@ -590,6 +623,6 @@ with tab_hr:
                     else:
                         man_df = pd.read_excel(uploaded_file)
                         
-                    render_salary_dashboard(man_df, "External User", 18000.0, 26, 8.0)
+                    render_salary_dashboard(man_df, "External User", 18000.0, 26, 8.0, 0.0)
                 except Exception as e:
                     st.error(f"Error reading file format: {e}")
