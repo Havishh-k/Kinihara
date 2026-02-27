@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import io
+import pytz
+import calendar
 from datetime import datetime
 
 # ==========================================
@@ -35,10 +37,20 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE,
             pin TEXT,
-            role TEXT
+            role TEXT,
+            monthly_salary REAL DEFAULT 18000.0,
+            working_days INTEGER DEFAULT 26,
+            standard_hours REAL DEFAULT 8.0
         )
     ''')
     
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN monthly_salary REAL DEFAULT 18000.0")
+        c.execute("ALTER TABLE users ADD COLUMN working_days INTEGER DEFAULT 26")
+        c.execute("ALTER TABLE users ADD COLUMN standard_hours REAL DEFAULT 8.0")
+    except sqlite3.OperationalError:
+        pass
+        
     c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
         initial_users = [
@@ -57,7 +69,7 @@ init_db()
 
 def get_users():
     conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query("SELECT name, pin, role FROM users", conn)
+    df = pd.read_sql_query("SELECT name, pin, role, monthly_salary, working_days, standard_hours FROM users", conn)
     conn.close()
     return df
 
@@ -186,7 +198,8 @@ with tab_staff:
                 if not valid:
                     st.error("Invalid PIN. Please try again.")
                 else:
-                    now = datetime.now()
+                    ist = pytz.timezone('Asia/Kolkata')
+                    now = datetime.now(ist)
                     current_time = now.strftime("%H:%M:%S")
                     date_val = now.strftime("%Y-%m-%d")    
                     month_val = now.strftime("%B")         
@@ -222,7 +235,8 @@ with tab_staff:
                 if not valid:
                     st.error("Invalid PIN. Please try again.")
                 else:
-                    now = datetime.now()
+                    ist = pytz.timezone('Asia/Kolkata')
+                    now = datetime.now(ist)
                     current_time = now.strftime("%H:%M:%S")
                     date_val = now.strftime("%Y-%m-%d")
                     
@@ -260,7 +274,7 @@ with tab_staff:
 # ==========================================
 # 4. Shared Salary Processing Function
 # ==========================================
-def render_salary_dashboard(df, target_employee, monthly_salary, working_days, standard_hours_per_day, ot_rate_multiplier):
+def render_salary_dashboard(df, target_employee, monthly_salary, working_days, standard_hours_per_day):
     if df.empty:
         st.info(f"No attendance records found to process.")
         return
@@ -311,7 +325,7 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
     else:
         deduction = 0.0
         
-    ot_pay = total_ot_hours * (per_hour_salary * ot_rate_multiplier)
+    ot_pay = total_ot_hours * 50.0
     final_salary = (monthly_salary - deduction) + ot_pay
     
     # UI Card Wrapper for Metrics
@@ -419,13 +433,6 @@ with tab_hr:
             st.rerun()
             
         st.sidebar.divider()
-        st.sidebar.subheader("Salary Variables")
-        with st.sidebar.container(border=True):
-            monthly_salary = st.number_input("Monthly Salary", min_value=0.0, step=1000.0, value=18000.0)
-            working_days = st.number_input("Total Working Days / Month", min_value=1, max_value=31, value=26)
-            standard_hours_per_day = st.number_input("Standard Hrs / Day", min_value=1.0, step=0.5, value=8.0)
-            ot_rate_multiplier = st.selectbox("OT Rate Multiplier", options=[1.5, 2.0])
-        
         st.header(":material/dashboard: HR Management Dashboard")
 
         hr_sub_tabs = st.tabs([":material/analytics: Salary Calculations", ":material/groups: Staff Management", ":material/folder_open: Manual Overrides"])
@@ -435,9 +442,27 @@ with tab_hr:
             st.markdown("Edit Check In/Out fields below to correct mistakes. Click **Save Edits** to recalculate.")
             target_employee = st.selectbox("Select Employee to Calculate", staff_names)
             
+            ist = pytz.timezone('Asia/Kolkata')
+            curr_month = datetime.now(ist).strftime("%B")
+            curr_year = datetime.now(ist).strftime("%Y")
+            months = list(calendar.month_name)[1:]
+            
+            col_f1, col_f2 = st.columns(2)
+            with col_f1: 
+                target_month = st.selectbox("Select Month", months, index=months.index(curr_month) if curr_month in months else 0)
+            with col_f2: 
+                years = [str(y) for y in range(2024, 2030)]
+                target_year = st.selectbox("Select Year", years, index=years.index(curr_year) if curr_year in years else 1)
+            
             conn = sqlite3.connect(DB_NAME)
-            query = "SELECT id, date_val, check_in, check_out, remark FROM attendance WHERE name=?"
-            df = pd.read_sql_query(query, conn, params=(target_employee,))
+            c = conn.cursor()
+            c.execute("SELECT monthly_salary, working_days, standard_hours FROM users WHERE name=?", (target_employee,))
+            user_vars = c.fetchone()
+            if not user_vars: user_vars = (18000.0, 26, 8.0)
+            monthly_salary, working_days, standard_hours_per_day = user_vars
+            
+            query = "SELECT id, date_val, check_in, check_out, remark FROM attendance WHERE name=? AND month_val=? AND year_val=?"
+            df = pd.read_sql_query(query, conn, params=(target_employee, target_month, target_year))
             conn.close()
             
             if df.empty:
@@ -488,12 +513,12 @@ with tab_hr:
                     
                     conn.commit()
                     
-                    query_full = "SELECT * FROM attendance WHERE name=?"
-                    full_df = pd.read_sql_query(query_full, conn, params=(target_employee,))
+                    query_full = "SELECT * FROM attendance WHERE name=? AND month_val=? AND year_val=?"
+                    full_df = pd.read_sql_query(query_full, conn, params=(target_employee, target_month, target_year))
                     conn.close()
                     
                     st.success("Changes saved! Below are the recalculated salary metrics:")
-                    render_salary_dashboard(full_df, target_employee, monthly_salary, working_days, standard_hours_per_day, ot_rate_multiplier)
+                    render_salary_dashboard(full_df, target_employee, monthly_salary, working_days, standard_hours_per_day)
                 else:
                     st.info("Click 'Save Edits & Compute Salary' to view the final payload slip and numbers.")
 
@@ -509,6 +534,12 @@ with tab_hr:
                     with col_f1: new_name = st.text_input("Exact Name")
                     with col_f2: new_pin = st.text_input("PIN (4 digits)", max_chars=4)
                     with col_f3: new_role = st.selectbox("Role", ["staff", "hr"])
+                    
+                    col_v1, col_v2, col_v3 = st.columns(3)
+                    with col_v1: new_salary = st.number_input("Monthly Salary", value=18000.0, step=1000.0)
+                    with col_v2: new_days = st.number_input("Working Days", value=26)
+                    with col_v3: new_hrs = st.number_input("Standard Hrs/Day", value=8.0, step=0.5)
+                    
                     submit_user = st.form_submit_button("Save User")
                     
                     if submit_user:
@@ -522,10 +553,10 @@ with tab_hr:
                             c.execute("SELECT id FROM users WHERE name=?", (new_name,))
                             ext = c.fetchone()
                             if ext:
-                                c.execute("UPDATE users SET pin=?, role=? WHERE name=?", (new_pin, new_role, new_name))
-                                st.success(f"Updated {new_name}'s PIN and Role.")
+                                c.execute("UPDATE users SET pin=?, role=?, monthly_salary=?, working_days=?, standard_hours=? WHERE name=?", (new_pin, new_role, new_salary, new_days, new_hrs, new_name))
+                                st.success(f"Updated {new_name}'s Profile Settings.")
                             else:
-                                c.execute("INSERT INTO users (name, pin, role) VALUES (?, ?, ?)", (new_name, new_pin, new_role))
+                                c.execute("INSERT INTO users (name, pin, role, monthly_salary, working_days, standard_hours) VALUES (?, ?, ?, ?, ?, ?)", (new_name, new_pin, new_role, new_salary, new_days, new_hrs))
                                 st.success(f"Added {new_name} as {new_role}.")
                             conn.commit()
                             conn.close()
@@ -559,6 +590,6 @@ with tab_hr:
                     else:
                         man_df = pd.read_excel(uploaded_file)
                         
-                    render_salary_dashboard(man_df, "External User", monthly_salary, working_days, standard_hours_per_day, ot_rate_multiplier)
+                    render_salary_dashboard(man_df, "External User", 18000.0, 26, 8.0)
                 except Exception as e:
                     st.error(f"Error reading file format: {e}")
