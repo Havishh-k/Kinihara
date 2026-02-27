@@ -373,18 +373,77 @@ with tab_hr:
 
         hr_sub_tabs = st.tabs(["📊 Salary Calculations", "👥 Staff Management", "📁 Manual Overrides"])
         
-        # 5.1 Salary Calculations (Reactive)
+        # 5.1 Salary Calculations (Reactive & Editable)
         with hr_sub_tabs[0]:
             st.subheader("Live Employee Calculations")
-            st.markdown("Values auto-update based on Sidebar configurations.")
+            st.markdown("Edit Check In/Out fields below to correct mistakes. Click **Save Edits** to recalculate.")
             target_employee = st.selectbox("Select Employee to Calculate for", staff_names)
             
             conn = sqlite3.connect(DB_NAME)
-            query = "SELECT * FROM attendance WHERE name=?"
+            query = "SELECT id, date_val, check_in, check_out, remark FROM attendance WHERE name=?"
             df = pd.read_sql_query(query, conn, params=(target_employee,))
             conn.close()
             
-            render_salary_dashboard(df, target_employee, monthly_salary, working_days, standard_hours_per_day, ot_rate_multiplier)
+            if df.empty:
+                 st.info(f"No attendance records found to process.")
+            else:
+                # Interactive Editor
+                edited_df = st.data_editor(
+                    df,
+                    column_config={
+                        "id": None, # Hide ID
+                        "date_val": st.column_config.TextColumn("Date", disabled=True),
+                        "check_in": st.column_config.TextColumn("Check In (HH:MM:SS)"),
+                        "check_out": st.column_config.TextColumn("Check Out (HH:MM:SS)"),
+                        "remark": st.column_config.TextColumn("Remark")
+                    },
+                    hide_index=True,
+                    num_rows="dynamic",
+                    use_container_width=True
+                )
+                
+                # Save & Recalculate button
+                if st.button("Save Edits & Compute Salary", type="primary"):
+                    conn = sqlite3.connect(DB_NAME)
+                    c = conn.cursor()
+                    
+                    for index, row in edited_df.iterrows():
+                        db_id = row['id']
+                        new_ci = row['check_in']
+                        new_co = row['check_out']
+                        new_remark = row['remark']
+                        
+                        # Recalculate work_hours if both exist
+                        work_hours = 0.0
+                        if pd.notna(new_ci) and pd.notna(new_co) and new_ci != "" and new_co != "":
+                            fmt = "%H:%M:%S"
+                            try:
+                                t1 = datetime.strptime(str(new_ci), fmt)
+                                t2 = datetime.strptime(str(new_co), fmt)
+                                tdelta = t2 - t1
+                                work_hours = tdelta.total_seconds() / 3600.0
+                                if work_hours < 0:
+                                    work_hours += 24.0
+                            except:
+                                work_hours = 0.0
+                                
+                        c.execute('''
+                            UPDATE attendance 
+                            SET check_in=?, check_out=?, work_hours=?, remark=?
+                            WHERE id=?
+                        ''', (new_ci, new_co, work_hours, new_remark, db_id))
+                    
+                    conn.commit()
+                    
+                    # Fetch fully updated table structure
+                    query_full = "SELECT * FROM attendance WHERE name=?"
+                    full_df = pd.read_sql_query(query_full, conn, params=(target_employee,))
+                    conn.close()
+                    
+                    st.success("Changes saved! Below are the recalculated salary metrics:")
+                    render_salary_dashboard(full_df, target_employee, monthly_salary, working_days, standard_hours_per_day, ot_rate_multiplier)
+                else:
+                    st.info("Click 'Save Edits & Compute Salary' to view the final payload slip and numbers.")
 
         # 5.2 Staff Management
         with hr_sub_tabs[1]:
