@@ -88,7 +88,7 @@ init_db()
 
 def get_users():
     conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query("SELECT name, pin, role FROM users", conn)
+    df = pd.read_sql_query("SELECT name, pin, role, monthly_salary, working_days, standard_hours, security_deposit FROM users", conn)
     conn.close()
     return df
 
@@ -476,34 +476,6 @@ with tab_hr:
             st.rerun()
             
         st.sidebar.divider()
-        
-        conn = sqlite3.connect(DB_NAME)
-        df_settings = pd.read_sql_query("SELECT * FROM global_settings LIMIT 1", conn)
-        conn.close()
-        
-        g_salary = float(df_settings['monthly_salary'].iloc[0])
-        g_days = int(df_settings['working_days'].iloc[0])
-        g_hours = float(df_settings['standard_hours'].iloc[0])
-        g_sd = float(df_settings['security_deposit'].iloc[0])
-        
-        st.sidebar.subheader("Global Salary Settings")
-        with st.sidebar.container(border=True):
-            new_salary = st.number_input("Monthly Salary", value=g_salary, step=1000.0)
-            new_days = st.number_input("Total Working Days", value=g_days)
-            new_hours = st.number_input("Standard Hrs/Day", value=g_hours, step=0.5)
-            new_sd = st.number_input("Base Security Dep.", value=g_sd, step=500.0)
-            
-            if new_salary != g_salary or new_days != g_days or new_hours != g_hours or new_sd != g_sd:
-                conn = sqlite3.connect(DB_NAME)
-                c = conn.cursor()
-                c.execute('''UPDATE global_settings 
-                             SET monthly_salary=?, working_days=?, standard_hours=?, security_deposit=? 
-                             WHERE id=1''', (new_salary, new_days, new_hours, new_sd))
-                conn.commit()
-                conn.close()
-                st.toast("Global settings auto-saved!")
-                st.rerun()
-
         st.header(":material/dashboard: HR Management Dashboard")
 
         hr_sub_tabs = st.tabs([":material/analytics: Salary Calculations", ":material/groups: Staff Management", ":material/folder_open: Manual Overrides"])
@@ -589,8 +561,13 @@ with tab_hr:
                 conn = sqlite3.connect(DB_NAME)
                 query_full = "SELECT * FROM attendance WHERE name=? AND month_val=? AND year_val=?"
                 full_df = pd.read_sql_query(query_full, conn, params=(target_employee, target_month, target_year))
+                c = conn.cursor()
+                c.execute("SELECT monthly_salary, working_days, standard_hours, security_deposit FROM users WHERE name=?", (target_employee,))
+                user_vars = c.fetchone()
+                if not user_vars: user_vars = (18000.0, 26, 8.0, 0.0)
+                monthly_salary, working_days, standard_hours_per_day, security_deposit = user_vars
                 conn.close()
-                render_salary_dashboard(full_df, target_employee, new_salary, new_days, new_hours, new_sd)
+                render_salary_dashboard(full_df, target_employee, monthly_salary, working_days, standard_hours_per_day, security_deposit)
 
         with hr_sub_tabs[1]:
             st.subheader("Manage Staff & PINs")
@@ -612,7 +589,8 @@ with tab_hr:
                 conn = sqlite3.connect(DB_NAME)
                 c = conn.cursor()
                 for _, row in edited_users.iterrows():
-                    c.execute("UPDATE users SET pin=?, role=? WHERE name=?", (row['pin'], row['role'], row['name']))
+                    c.execute("UPDATE users SET pin=?, role=?, monthly_salary=?, working_days=?, standard_hours=?, security_deposit=? WHERE name=?", 
+                              (row['pin'], row['role'], row['monthly_salary'], row['working_days'], row['standard_hours'], row['security_deposit'], row['name']))
                 conn.commit()
                 conn.close()
                 st.toast("Staff table auto-saved!")
@@ -624,6 +602,14 @@ with tab_hr:
                     with col_f1: new_name = st.text_input("Exact Name")
                     with col_f2: new_pin = st.text_input("PIN (4 digits)", max_chars=4)
                     with col_f3: new_role = st.selectbox("Role", ["staff", "hr"])
+                    
+                    col_v1, col_v2 = st.columns(2)
+                    with col_v1: new_salary = st.number_input("Monthly Salary", value=18000.0, step=1000.0)
+                    with col_v2: new_days = st.number_input("Working Days", value=26)
+                    
+                    col_v3, col_v4 = st.columns(2)
+                    with col_v3: new_hrs = st.number_input("Standard Hrs/Day", value=8.0, step=0.5)
+                    with col_v4: new_sd = st.number_input("Base Security Deposit", value=0.0, step=500.0)
                     
                     submit_user = st.form_submit_button("Save New User")
                     
@@ -638,10 +624,10 @@ with tab_hr:
                             c.execute("SELECT id FROM users WHERE name=?", (new_name,))
                             ext = c.fetchone()
                             if ext:
-                                c.execute("UPDATE users SET pin=?, role=? WHERE name=?", (new_pin, new_role, new_name))
+                                c.execute("UPDATE users SET pin=?, role=?, monthly_salary=?, working_days=?, standard_hours=?, security_deposit=? WHERE name=?", (new_pin, new_role, new_salary, new_days, new_hrs, new_sd, new_name))
                                 st.success(f"Updated {new_name}'s Profile Settings.")
                             else:
-                                c.execute("INSERT INTO users (name, pin, role) VALUES (?, ?, ?)", (new_name, new_pin, new_role))
+                                c.execute("INSERT INTO users (name, pin, role, monthly_salary, working_days, standard_hours, security_deposit) VALUES (?, ?, ?, ?, ?, ?, ?)", (new_name, new_pin, new_role, new_salary, new_days, new_hrs, new_sd))
                                 st.success(f"Added {new_name} as {new_role}.")
                             conn.commit()
                             conn.close()
@@ -674,6 +660,6 @@ with tab_hr:
                     else:
                         man_df = pd.read_excel(uploaded_file)
                         
-                    render_salary_dashboard(man_df, "External User", new_salary, new_days, new_hours, new_sd)
+                    render_salary_dashboard(man_df, "External User", 18000.0, 26, 8.0, 0.0)
                 except Exception as e:
                     st.error(f"Error reading file format: {e}")
