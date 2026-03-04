@@ -57,6 +57,19 @@ def init_db():
     except sqlite3.OperationalError:
         pass
         
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS global_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            monthly_salary REAL,
+            working_days INTEGER,
+            standard_hours REAL,
+            security_deposit REAL
+        )
+    ''')
+    c.execute("SELECT COUNT(*) FROM global_settings")
+    if c.fetchone()[0] == 0:
+        c.execute("INSERT INTO global_settings (monthly_salary, working_days, standard_hours, security_deposit) VALUES (18000.0, 26, 8.0, 0.0)")
+
     c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
         initial_users = [
@@ -75,7 +88,7 @@ init_db()
 
 def get_users():
     conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query("SELECT name, pin, role, monthly_salary, working_days, standard_hours, security_deposit FROM users", conn)
+    df = pd.read_sql_query("SELECT name, pin, role FROM users", conn)
     conn.close()
     return df
 
@@ -463,6 +476,34 @@ with tab_hr:
             st.rerun()
             
         st.sidebar.divider()
+        
+        conn = sqlite3.connect(DB_NAME)
+        df_settings = pd.read_sql_query("SELECT * FROM global_settings LIMIT 1", conn)
+        conn.close()
+        
+        g_salary = float(df_settings['monthly_salary'].iloc[0])
+        g_days = int(df_settings['working_days'].iloc[0])
+        g_hours = float(df_settings['standard_hours'].iloc[0])
+        g_sd = float(df_settings['security_deposit'].iloc[0])
+        
+        st.sidebar.subheader("Global Salary Settings")
+        with st.sidebar.container(border=True):
+            new_salary = st.number_input("Monthly Salary", value=g_salary, step=1000.0)
+            new_days = st.number_input("Total Working Days", value=g_days)
+            new_hours = st.number_input("Standard Hrs/Day", value=g_hours, step=0.5)
+            new_sd = st.number_input("Base Security Dep.", value=g_sd, step=500.0)
+            
+            if new_salary != g_salary or new_days != g_days or new_hours != g_hours or new_sd != g_sd:
+                conn = sqlite3.connect(DB_NAME)
+                c = conn.cursor()
+                c.execute('''UPDATE global_settings 
+                             SET monthly_salary=?, working_days=?, standard_hours=?, security_deposit=? 
+                             WHERE id=1''', (new_salary, new_days, new_hours, new_sd))
+                conn.commit()
+                conn.close()
+                st.toast("Global settings auto-saved!")
+                st.rerun()
+
         st.header(":material/dashboard: HR Management Dashboard")
 
         hr_sub_tabs = st.tabs([":material/analytics: Salary Calculations", ":material/groups: Staff Management", ":material/folder_open: Manual Overrides"])
@@ -484,50 +525,26 @@ with tab_hr:
                 years = [str(y) for y in range(2024, 2030)]
                 target_year = st.selectbox("Select Year", years, index=years.index(curr_year) if curr_year in years else 1)
             
-            conn = sqlite3.connect(DB_NAME)
-            c = conn.cursor()
-            c.execute("SELECT monthly_salary, working_days, standard_hours, security_deposit FROM users WHERE name=?", (target_employee,))
-            user_vars = c.fetchone()
-            if not user_vars: user_vars = (18000.0, 26, 8.0, 0.0)
-            monthly_salary, working_days, standard_hours_per_day, security_deposit = user_vars
-            
-            query = "SELECT id, date_val, check_in, check_out, remark FROM attendance WHERE name=? AND month_val=? AND year_val=?"
-            df = pd.read_sql_query(query, conn, params=(target_employee, target_month, target_year))
-            conn.close()
-            
-            if df.empty:
-                 st.info(f"No attendance records found to process.")
-            else:
-                edited_df = st.data_editor(
-                    df,
-                    column_config={
-                        "id": None,
-                        "date_val": st.column_config.TextColumn("Date", disabled=True),
-                        "check_in": st.column_config.TextColumn("Check In (HH:MM:SS)"),
-                        "check_out": st.column_config.TextColumn("Check Out (HH:MM:SS)"),
-                        "remark": st.column_config.TextColumn("Remark")
-                    },
-                    hide_index=True,
-                    num_rows="dynamic",
-                    use_container_width=True
-                )
+                check1 = df.fillna("").astype(str)
+                check2 = edited_df.fillna("").astype(str)
                 
-                if st.button(":material/save: Save Edits & Compute Salary", type="primary"):
+                if not check1.equals(check2):
                     conn = sqlite3.connect(DB_NAME)
                     c = conn.cursor()
                     
                     for index, row in edited_df.iterrows():
                         db_id = row['id']
-                        new_ci = row['check_in']
-                        new_co = row['check_out']
-                        new_remark = row['remark']
+                        if pd.isna(db_id): continue 
+                        new_ci = str(row['check_in']).strip() if pd.notna(row['check_in']) else ""
+                        new_co = str(row['check_out']).strip() if pd.notna(row['check_out']) else ""
+                        new_remark = str(row['remark']).strip() if pd.notna(row['remark']) else ""
                         
                         work_hours = 0.0
-                        if pd.notna(new_ci) and pd.notna(new_co) and new_ci != "" and new_co != "":
+                        if new_ci != "" and new_co != "":
                             fmt = "%H:%M:%S"
                             try:
-                                t1 = datetime.strptime(str(new_ci), fmt)
-                                t2 = datetime.strptime(str(new_co), fmt)
+                                t1 = datetime.strptime(new_ci, fmt)
+                                t2 = datetime.strptime(new_co, fmt)
                                 tdelta = t2 - t1
                                 work_hours = tdelta.total_seconds() / 3600.0
                                 if work_hours < 0:
@@ -542,39 +559,22 @@ with tab_hr:
                         ''', (new_ci, new_co, work_hours, new_remark, db_id))
                     
                     conn.commit()
-                    
-                    query_full = "SELECT * FROM attendance WHERE name=? AND month_val=? AND year_val=?"
-                    full_df = pd.read_sql_query(query_full, conn, params=(target_employee, target_month, target_year))
                     conn.close()
-                    
-                    st.success("Changes saved! Below are the recalculated salary metrics:")
-                    render_salary_dashboard(full_df, target_employee, monthly_salary, working_days, standard_hours_per_day, security_deposit)
-                else:
-                    st.info("Click 'Save Edits & Compute Salary' to view the final payload slip and numbers.")
+                    st.toast("Timesheet Auto-Saved!")
+                    st.rerun()
+
+            if not df.empty:
+                conn = sqlite3.connect(DB_NAME)
+                query_full = "SELECT * FROM attendance WHERE name=? AND month_val=? AND year_val=?"
+                full_df = pd.read_sql_query(query_full, conn, params=(target_employee, target_month, target_year))
+                conn.close()
+                render_salary_dashboard(full_df, target_employee, new_salary, new_days, new_hours, new_sd)
 
         with hr_sub_tabs[1]:
             st.subheader("Manage Staff & PINs")
             
-            with st.container(border=True):
-                st.markdown("#### :material/public: Global Adjustments (Applies to ALL Staff)")
-                st.markdown("Set identical salary variables for everyone in the company with one click.")
-                col_g1, col_g2, col_g3, col_g4 = st.columns(4)
-                with col_g1: global_salary = st.number_input("Global Salary", value=18000.0, step=1000.0)
-                with col_g2: global_days = st.number_input("Global Working Days", value=26)
-                with col_g3: global_hrs = st.number_input("Global Hrs/Day", value=8.0, step=0.5)
-                with col_g4: global_sd = st.number_input("Global Security Dep.", value=0.0, step=500.0)
-                
-                if st.button(":material/done_all: Apply to All Staff", type="primary"):
-                    conn = sqlite3.connect(DB_NAME)
-                    c = conn.cursor()
-                    c.execute("UPDATE users SET monthly_salary=?, working_days=?, standard_hours=?, security_deposit=?", (global_salary, global_days, global_hrs, global_sd))
-                    conn.commit()
-                    conn.close()
-                    st.success("Global configurations applied to all employees successfully!")
-                    st.rerun()
-            
             st.markdown("#### Individual Staff Data")
-            st.markdown("Edit fields directly in the table below and click Save.")
+            st.markdown("Edit fields directly in the table below. Changes auto-save instantly.")
             users_df = get_users()
             edited_users = st.data_editor(
                 users_df, 
@@ -583,15 +583,18 @@ with tab_hr:
                 disabled=["name"] # Prevent changing primary keys directly
             )
             
-            if st.button(":material/save: Save Staff Table Edits"):
+            check1 = users_df.fillna("").astype(str)
+            check2 = edited_users.fillna("").astype(str)
+            
+            if not check1.equals(check2):
                 conn = sqlite3.connect(DB_NAME)
                 c = conn.cursor()
                 for _, row in edited_users.iterrows():
-                    c.execute("UPDATE users SET pin=?, role=?, monthly_salary=?, working_days=?, standard_hours=?, security_deposit=? WHERE name=?", 
-                              (row['pin'], row['role'], row['monthly_salary'], row['working_days'], row['standard_hours'], row['security_deposit'], row['name']))
+                    c.execute("UPDATE users SET pin=?, role=? WHERE name=?", (row['pin'], row['role'], row['name']))
                 conn.commit()
                 conn.close()
-                st.success("Staff table updated!")
+                st.toast("Staff table auto-saved!")
+                st.rerun()
             
             with st.expander("Add New User"):
                 with st.form("add_user_form", clear_on_submit=True):
@@ -599,14 +602,6 @@ with tab_hr:
                     with col_f1: new_name = st.text_input("Exact Name")
                     with col_f2: new_pin = st.text_input("PIN (4 digits)", max_chars=4)
                     with col_f3: new_role = st.selectbox("Role", ["staff", "hr"])
-                    
-                    col_v1, col_v2 = st.columns(2)
-                    with col_v1: new_salary = st.number_input("Monthly Salary", value=18000.0, step=1000.0)
-                    with col_v2: new_days = st.number_input("Working Days", value=26)
-                    
-                    col_v3, col_v4 = st.columns(2)
-                    with col_v3: new_hrs = st.number_input("Standard Hrs/Day", value=8.0, step=0.5)
-                    with col_v4: new_sd = st.number_input("Base Security Deposit", value=0.0, step=500.0)
                     
                     submit_user = st.form_submit_button("Save New User")
                     
@@ -621,10 +616,10 @@ with tab_hr:
                             c.execute("SELECT id FROM users WHERE name=?", (new_name,))
                             ext = c.fetchone()
                             if ext:
-                                c.execute("UPDATE users SET pin=?, role=?, monthly_salary=?, working_days=?, standard_hours=?, security_deposit=? WHERE name=?", (new_pin, new_role, new_salary, new_days, new_hrs, new_sd, new_name))
+                                c.execute("UPDATE users SET pin=?, role=? WHERE name=?", (new_pin, new_role, new_name))
                                 st.success(f"Updated {new_name}'s Profile Settings.")
                             else:
-                                c.execute("INSERT INTO users (name, pin, role, monthly_salary, working_days, standard_hours, security_deposit) VALUES (?, ?, ?, ?, ?, ?, ?)", (new_name, new_pin, new_role, new_salary, new_days, new_hrs, new_sd))
+                                c.execute("INSERT INTO users (name, pin, role) VALUES (?, ?, ?)", (new_name, new_pin, new_role))
                                 st.success(f"Added {new_name} as {new_role}.")
                             conn.commit()
                             conn.close()
@@ -657,6 +652,6 @@ with tab_hr:
                     else:
                         man_df = pd.read_excel(uploaded_file)
                         
-                    render_salary_dashboard(man_df, "External User", 18000.0, 26, 8.0, 0.0)
+                    render_salary_dashboard(man_df, "External User", new_salary, new_days, new_hours, new_sd)
                 except Exception as e:
                     st.error(f"Error reading file format: {e}")
