@@ -554,11 +554,46 @@ with tab_hr:
 
         with hr_sub_tabs[1]:
             st.subheader("Manage Staff & PINs")
-            users_df = get_users()
-            st.dataframe(users_df, use_container_width=True, hide_index=True)
             
             with st.container(border=True):
-                st.markdown("#### Add or Update User")
+                st.markdown("#### :material/public: Global Adjustments (Applies to ALL Staff)")
+                st.markdown("Set identical salary variables for everyone in the company with one click.")
+                col_g1, col_g2, col_g3, col_g4 = st.columns(4)
+                with col_g1: global_salary = st.number_input("Global Salary", value=18000.0, step=1000.0)
+                with col_g2: global_days = st.number_input("Global Working Days", value=26)
+                with col_g3: global_hrs = st.number_input("Global Hrs/Day", value=8.0, step=0.5)
+                with col_g4: global_sd = st.number_input("Global Security Dep.", value=0.0, step=500.0)
+                
+                if st.button(":material/done_all: Apply to All Staff", type="primary"):
+                    conn = sqlite3.connect(DB_NAME)
+                    c = conn.cursor()
+                    c.execute("UPDATE users SET monthly_salary=?, working_days=?, standard_hours=?, security_deposit=?", (global_salary, global_days, global_hrs, global_sd))
+                    conn.commit()
+                    conn.close()
+                    st.success("Global configurations applied to all employees successfully!")
+                    st.rerun()
+            
+            st.markdown("#### Individual Staff Data")
+            st.markdown("Edit fields directly in the table below and click Save.")
+            users_df = get_users()
+            edited_users = st.data_editor(
+                users_df, 
+                use_container_width=True, 
+                hide_index=True,
+                disabled=["name"] # Prevent changing primary keys directly
+            )
+            
+            if st.button(":material/save: Save Staff Table Edits"):
+                conn = sqlite3.connect(DB_NAME)
+                c = conn.cursor()
+                for _, row in edited_users.iterrows():
+                    c.execute("UPDATE users SET pin=?, role=?, monthly_salary=?, working_days=?, standard_hours=?, security_deposit=? WHERE name=?", 
+                              (row['pin'], row['role'], row['monthly_salary'], row['working_days'], row['standard_hours'], row['security_deposit'], row['name']))
+                conn.commit()
+                conn.close()
+                st.success("Staff table updated!")
+            
+            with st.expander("Add New User"):
                 with st.form("add_user_form", clear_on_submit=True):
                     col_f1, col_f2, col_f3 = st.columns(3)
                     with col_f1: new_name = st.text_input("Exact Name")
@@ -573,7 +608,7 @@ with tab_hr:
                     with col_v3: new_hrs = st.number_input("Standard Hrs/Day", value=8.0, step=0.5)
                     with col_v4: new_sd = st.number_input("Base Security Deposit", value=0.0, step=500.0)
                     
-                    submit_user = st.form_submit_button("Save User")
+                    submit_user = st.form_submit_button("Save New User")
                     
                     if submit_user:
                         if len(new_pin) != 4:
@@ -595,8 +630,7 @@ with tab_hr:
                             conn.close()
                             st.rerun()
                             
-            with st.container(border=True):
-                st.markdown("#### Remove Staff")
+            with st.expander("Remove User"):
                 with st.form("delete_user_form"):
                     del_name = st.selectbox("Select User to remove", staff_names)
                     del_submit = st.form_submit_button("Remove User")
