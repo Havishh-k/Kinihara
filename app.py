@@ -525,6 +525,28 @@ with tab_hr:
                 years = [str(y) for y in range(2024, 2030)]
                 target_year = st.selectbox("Select Year", years, index=years.index(curr_year) if curr_year in years else 1)
             
+            conn = sqlite3.connect(DB_NAME)
+            query = "SELECT id, date_val, check_in, check_out, remark FROM attendance WHERE name=? AND month_val=? AND year_val=?"
+            df = pd.read_sql_query(query, conn, params=(target_employee, target_month, target_year))
+            conn.close()
+            
+            if df.empty:
+                 st.info(f"No attendance records found to process.")
+            else:
+                edited_df = st.data_editor(
+                    df,
+                    column_config={
+                        "id": None,
+                        "date_val": st.column_config.TextColumn("Date", disabled=True),
+                        "check_in": st.column_config.TextColumn("Check In (HH:MM:SS)"),
+                        "check_out": st.column_config.TextColumn("Check Out (HH:MM:SS)"),
+                        "remark": st.column_config.TextColumn("Remark")
+                    },
+                    hide_index=True,
+                    num_rows="dynamic",
+                    use_container_width=True
+                )
+                
                 check1 = df.fillna("").astype(str)
                 check2 = edited_df.fillna("").astype(str)
                 
