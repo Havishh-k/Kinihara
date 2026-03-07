@@ -1,113 +1,47 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
+import pymongo
 import io
 import pytz
 import calendar
 from datetime import datetime
 
 # ==========================================
-# 1. Database Initialization (SQLite)
+# 1. Database Initialization (MongoDB)
 # ==========================================
-DB_NAME = 'master_timesheet.db'
+@st.cache_resource
+def init_connection():
+    return pymongo.MongoClient(st.secrets["MONGO_URI"])
 
+client = init_connection()
+db = client['kinihara_timesheet']
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS attendance (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            date_val TEXT,
-            month_val TEXT,
-            year_val TEXT,
-            day_val TEXT,
-            check_in TEXT,
-            check_out TEXT,
-            work_hours REAL,
-            ot_hours REAL,
-            remark TEXT,
-            absent TEXT
-        )
-    ''')
-    
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE,
-            pin TEXT,
-            role TEXT,
-            monthly_salary REAL DEFAULT 18000.0,
-            working_days INTEGER DEFAULT 26,
-            standard_hours REAL DEFAULT 8.0,
-            security_deposit REAL DEFAULT 0.0
-        )
-    ''')
-    
-    try:
-        c.execute("ALTER TABLE users ADD COLUMN monthly_salary REAL DEFAULT 18000.0")
-        c.execute("ALTER TABLE users ADD COLUMN working_days INTEGER DEFAULT 26")
-        c.execute("ALTER TABLE users ADD COLUMN standard_hours REAL DEFAULT 8.0")
-    except sqlite3.OperationalError:
-        pass
-        
-    try:
-        c.execute("ALTER TABLE users ADD COLUMN security_deposit REAL DEFAULT 0.0")
-    except sqlite3.OperationalError:
-        pass
-        
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS global_settings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            monthly_salary REAL,
-            working_days INTEGER,
-            standard_hours REAL,
-            security_deposit REAL
-        )
-    ''')
-    c.execute("SELECT COUNT(*) FROM global_settings")
-    if c.fetchone()[0] == 0:
-        c.execute("INSERT INTO global_settings (monthly_salary, working_days, standard_hours, security_deposit) VALUES (18000.0, 26, 8.0, 0.0)")
-
-    c.execute("SELECT COUNT(*) FROM users")
-    if c.fetchone()[0] == 0:
+    users_coll = db['users']
+    if users_coll.count_documents({}) == 0:
         initial_users = [
-            ("Sangeeta", "0000", "hr"),
-            ("Om", "1111", "staff"),
-            ("Umesh", "2222", "staff"),
-            ("Nilesh", "3333", "staff"),
-            ("Abhishek", "4444", "staff")
+            {"name": "Sangeeta", "pin": "0000", "role": "hr", "monthly_salary": 18000.0, "working_days": 26, "standard_hours": 8.0, "security_deposit": 0.0},
+            {"name": "Om", "pin": "1111", "role": "staff", "monthly_salary": 18000.0, "working_days": 26, "standard_hours": 8.0, "security_deposit": 0.0},
+            {"name": "Umesh", "pin": "2222", "role": "staff", "monthly_salary": 18000.0, "working_days": 26, "standard_hours": 8.0, "security_deposit": 0.0},
+            {"name": "Nilesh", "pin": "3333", "role": "staff", "monthly_salary": 18000.0, "working_days": 26, "standard_hours": 8.0, "security_deposit": 0.0},
+            {"name": "Abhishek", "pin": "4444", "role": "staff", "monthly_salary": 18000.0, "working_days": 26, "standard_hours": 8.0, "security_deposit": 0.0}
         ]
-        c.executemany("INSERT INTO users (name, pin, role) VALUES (?, ?, ?)", initial_users)
-        
-    conn.commit()
-    conn.close()
+        users_coll.insert_many(initial_users)
 
 init_db()
 
 def get_users():
-    conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query("SELECT name, pin, role, monthly_salary, working_days, standard_hours, security_deposit FROM users", conn)
-    conn.close()
+    cursor = db.users.find({}, {"_id": 0, "name": 1, "pin": 1, "role": 1, "monthly_salary": 1, "working_days": 1, "standard_hours": 1, "security_deposit": 1})
+    df = pd.DataFrame(list(cursor))
     return df
 
 def get_staff_names():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT name FROM users")
-    names = [row[0] for row in c.fetchall()]
-    conn.close()
+    names = db.users.distinct("name")
     return names
 
 def check_pin(name, pin):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT pin, role FROM users WHERE name=?", (name,))
-    res = c.fetchone()
-    conn.close()
-    if res and res[0] == pin:
-        return True, res[1]
+    user = db.users.find_one({"name": name})
+    if user and user.get("pin") == pin:
+        return True, user.get("role")
     return False, None
 
 # ==========================================
@@ -225,28 +159,37 @@ with tab_staff:
                     year_val = now.strftime("%Y")          
                     day_val = now.strftime("%A")           
                     
-                    conn = sqlite3.connect(DB_NAME)
-                    c = conn.cursor()
-                    
-                    c.execute("SELECT id, date_val FROM attendance WHERE name=? AND check_out IS NULL AND date_val != ?", (employee_name, date_val))
-                    open_shifts = c.fetchall()
+                    open_shifts = db.attendance.find({
+                        "name": employee_name, 
+                        "check_out": {"$in": [None, ""]}, 
+                        "date_val": {"$ne": date_val}
+                    })
                     for shift in open_shifts:
-                        c.execute("UPDATE attendance SET check_out = '18:30:00', remark = 'Auto-checkout (Forgot)' WHERE id=?", (shift[0],))
+                        db.attendance.update_one(
+                            {"_id": shift["_id"]}, 
+                            {"$set": {"check_out": "18:30:00", "remark": "Auto-checkout (Forgot)"}}
+                        )
                     
-                    c.execute("SELECT id, check_in FROM attendance WHERE name=? AND date_val=?", (employee_name, date_val))
-                    today_shift = c.fetchone()
+                    today_shift = db.attendance.find_one({"name": employee_name, "date_val": date_val})
                     
-                    if today_shift and today_shift[1]:
-                        st.warning(f"You checked in today at {today_shift[1]}.")
+                    if today_shift and today_shift.get("check_in"):
+                        st.warning(f"You checked in today at {today_shift['check_in']}.")
                     else:
-                        c.execute('''
-                            INSERT INTO attendance (name, date_val, month_val, year_val, day_val, check_in)
-                            VALUES (?, ?, ?, ?, ?, ?)
-                        ''', (employee_name, date_val, month_val, year_val, day_val, current_time))
+                        doc = {
+                            "name": employee_name,
+                            "date_val": date_val,
+                            "month_val": month_val,
+                            "year_val": year_val,
+                            "day_val": day_val,
+                            "check_in": current_time,
+                            "check_out": "",
+                            "work_hours": 0.0,
+                            "ot_hours": 0.0,
+                            "remark": "",
+                            "absent": "No"
+                        }
+                        db.attendance.insert_one(doc)
                         st.success(f"{employee_name} checked in successfully at {current_time}! Please remember to check out.")
-                    
-                    conn.commit()
-                    conn.close()
 
         with col_btn2:
             if st.button(":material/logout: Check Out", type="secondary", use_container_width=True) and employee_name:
@@ -259,19 +202,15 @@ with tab_staff:
                     current_time = now.strftime("%H:%M:%S")
                     date_val = now.strftime("%Y-%m-%d")
                     
-                    conn = sqlite3.connect(DB_NAME)
-                    c = conn.cursor()
-                    
-                    c.execute("SELECT id, check_in, check_out FROM attendance WHERE name=? AND date_val=?", (employee_name, date_val))
-                    today_shift = c.fetchone()
+                    today_shift = db.attendance.find_one({"name": employee_name, "date_val": date_val})
                     
                     if not today_shift:
                         st.error("No Check-In record found for today. Please Check In first.")
-                    elif today_shift[2]: 
-                        st.warning(f"You already checked out today at {today_shift[2]}.")
+                    elif today_shift.get("check_out"): 
+                        st.warning(f"You already checked out today at {today_shift['check_out']}.")
                     else:
-                        shift_id = today_shift[0]
-                        check_in_time_str = today_shift[1]
+                        doc_id = today_shift["_id"]
+                        check_in_time_str = today_shift.get("check_in", "")
                         
                         fmt = "%H:%M:%S"
                         try:
@@ -284,11 +223,11 @@ with tab_staff:
                         except:
                             work_hours = 0.0
                             
-                        c.execute("UPDATE attendance SET check_out=?, work_hours=? WHERE id=?", (current_time, work_hours, shift_id))
+                        db.attendance.update_one(
+                            {"_id": doc_id},
+                            {"$set": {"check_out": current_time, "work_hours": work_hours}}
+                        )
                         st.success(f"{employee_name} checked out successfully at {current_time}! Work Hours Logged: {work_hours:.2f} hrs.")
-                    
-                    conn.commit()
-                    conn.close()
 
 # ==========================================
 # 4. Shared Salary Processing Function
@@ -378,10 +317,12 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
         with col_m4:
             st.metric("Final Payable Salary", f"₹ {final_salary:,.2f}")
         
+    df['record_date'] = pd.to_datetime(df['date_val'], errors='coerce')
+    df['Month '] = df['record_date'].dt.strftime('%B')
+        
     export_mapping = {
         'name': 'Name',
         'date_val': 'Date',
-        'month_val': 'Month ',
         'year_val': 'Year ',
         'day_val': 'Day ',
         'check_in': 'Check In',
@@ -448,11 +389,9 @@ with tab_hr:
         st.markdown("Only authorized HR personnel can access these tools.")
         
         with st.container(border=True):
-            conn = sqlite3.connect(DB_NAME)
-            c = conn.cursor()
-            c.execute("SELECT name FROM users WHERE role='hr'")
-            hr_names = [row[0] for row in c.fetchall()]
-            conn.close()
+            hr_users = db.users.find({"role": "hr"})
+            hr_names = [user['name'] for user in hr_users]
+            
             
             if not hr_names:
                 st.error("No HR Admin found in database. Please initialize the DB properly.")
@@ -497,10 +436,15 @@ with tab_hr:
                 years = [str(y) for y in range(2024, 2030)]
                 target_year = st.selectbox("Select Year", years, index=years.index(curr_year) if curr_year in years else 1)
             
-            conn = sqlite3.connect(DB_NAME)
-            query = "SELECT id, date_val, check_in, check_out, remark FROM attendance WHERE name=? AND month_val=? AND year_val=?"
-            df = pd.read_sql_query(query, conn, params=(target_employee, target_month, target_year))
-            conn.close()
+            cursor = db.attendance.find({
+                "name": target_employee, 
+                "month_val": target_month, 
+                "year_val": target_year
+            }, {"_id": 1, "date_val": 1, "check_in": 1, "check_out": 1, "remark": 1})
+            
+            df = pd.DataFrame(list(cursor))
+            if not df.empty:
+                df['_id'] = df['_id'].astype(str)
             
             if df.empty:
                  st.info(f"No attendance records found to process.")
@@ -508,7 +452,7 @@ with tab_hr:
                 edited_df = st.data_editor(
                     df,
                     column_config={
-                        "id": None,
+                        "_id": None,
                         "date_val": st.column_config.TextColumn("Date", disabled=True),
                         "check_in": st.column_config.TextColumn("Check In (HH:MM:SS)"),
                         "check_out": st.column_config.TextColumn("Check Out (HH:MM:SS)"),
@@ -523,12 +467,11 @@ with tab_hr:
                 check2 = edited_df.fillna("").astype(str)
                 
                 if not check1.equals(check2):
-                    conn = sqlite3.connect(DB_NAME)
-                    c = conn.cursor()
+                    from bson.objectid import ObjectId
                     
                     for index, row in edited_df.iterrows():
-                        db_id = row['id']
-                        if pd.isna(db_id): continue 
+                        db_id = row.get('_id')
+                        if pd.isna(db_id) or not db_id: continue 
                         new_ci = str(row['check_in']).strip() if pd.notna(row['check_in']) else ""
                         new_co = str(row['check_out']).strip() if pd.notna(row['check_out']) else ""
                         new_remark = str(row['remark']).strip() if pd.notna(row['remark']) else ""
@@ -546,27 +489,37 @@ with tab_hr:
                             except:
                                 work_hours = 0.0
                                 
-                        c.execute('''
-                            UPDATE attendance 
-                            SET check_in=?, check_out=?, work_hours=?, remark=?
-                            WHERE id=?
-                        ''', (new_ci, new_co, work_hours, new_remark, db_id))
+                        db.attendance.update_one(
+                            {"_id": ObjectId(db_id)},
+                            {"$set": {
+                                "check_in": new_ci, 
+                                "check_out": new_co, 
+                                "work_hours": work_hours, 
+                                "remark": new_remark
+                            }}
+                        )
                     
-                    conn.commit()
-                    conn.close()
                     st.toast("Timesheet Auto-Saved!")
                     st.rerun()
 
             if not df.empty:
-                conn = sqlite3.connect(DB_NAME)
-                query_full = "SELECT * FROM attendance WHERE name=? AND month_val=? AND year_val=?"
-                full_df = pd.read_sql_query(query_full, conn, params=(target_employee, target_month, target_year))
-                c = conn.cursor()
-                c.execute("SELECT monthly_salary, working_days, standard_hours, security_deposit FROM users WHERE name=?", (target_employee,))
-                user_vars = c.fetchone()
-                if not user_vars: user_vars = (18000.0, 26, 8.0, 0.0)
-                monthly_salary, working_days, standard_hours_per_day, security_deposit = user_vars
-                conn.close()
+                full_cursor = db.attendance.find({
+                    "name": target_employee, 
+                    "month_val": target_month, 
+                    "year_val": target_year
+                })
+                full_df = pd.DataFrame(list(full_cursor))
+                if not full_df.empty:
+                    full_df['_id'] = full_df['_id'].astype(str)
+                
+                user_vars = db.users.find_one({"name": target_employee})
+                if not user_vars: 
+                    user_vars = {"monthly_salary": 18000.0, "working_days": 26, "standard_hours": 8.0, "security_deposit": 0.0}
+                monthly_salary = float(user_vars.get("monthly_salary", 18000.0))
+                working_days = int(user_vars.get("working_days", 26))
+                standard_hours_per_day = float(user_vars.get("standard_hours", 8.0))
+                security_deposit = float(user_vars.get("security_deposit", 0.0))
+                
                 render_salary_dashboard(full_df, target_employee, monthly_salary, working_days, standard_hours_per_day, security_deposit)
 
         with hr_sub_tabs[1]:
@@ -586,13 +539,18 @@ with tab_hr:
             check2 = edited_users.fillna("").astype(str)
             
             if not check1.equals(check2):
-                conn = sqlite3.connect(DB_NAME)
-                c = conn.cursor()
                 for _, row in edited_users.iterrows():
-                    c.execute("UPDATE users SET pin=?, role=?, monthly_salary=?, working_days=?, standard_hours=?, security_deposit=? WHERE name=?", 
-                              (row['pin'], row['role'], row['monthly_salary'], row['working_days'], row['standard_hours'], row['security_deposit'], row['name']))
-                conn.commit()
-                conn.close()
+                    db.users.update_one(
+                        {"name": row['name']},
+                        {"$set": {
+                            "pin": row['pin'], 
+                            "role": row['role'], 
+                            "monthly_salary": float(row['monthly_salary']), 
+                            "working_days": int(row['working_days']), 
+                            "standard_hours": float(row['standard_hours']), 
+                            "security_deposit": float(row['security_deposit'])
+                        }}
+                    )
                 st.toast("Staff table auto-saved!")
                 st.rerun()
             
@@ -619,18 +577,24 @@ with tab_hr:
                         elif not new_name:
                             st.error("Name cannot be empty.")
                         else:
-                            conn = sqlite3.connect(DB_NAME)
-                            c = conn.cursor()
-                            c.execute("SELECT id FROM users WHERE name=?", (new_name,))
-                            ext = c.fetchone()
+                            ext = db.users.find_one({"name": new_name})
                             if ext:
-                                c.execute("UPDATE users SET pin=?, role=?, monthly_salary=?, working_days=?, standard_hours=?, security_deposit=? WHERE name=?", (new_pin, new_role, new_salary, new_days, new_hrs, new_sd, new_name))
+                                db.users.update_one(
+                                    {"name": new_name},
+                                    {"$set": {
+                                        "pin": new_pin, "role": new_role, 
+                                        "monthly_salary": new_salary, "working_days": new_days, 
+                                        "standard_hours": new_hrs, "security_deposit": new_sd
+                                    }}
+                                )
                                 st.success(f"Updated {new_name}'s Profile Settings.")
                             else:
-                                c.execute("INSERT INTO users (name, pin, role, monthly_salary, working_days, standard_hours, security_deposit) VALUES (?, ?, ?, ?, ?, ?, ?)", (new_name, new_pin, new_role, new_salary, new_days, new_hrs, new_sd))
+                                db.users.insert_one({
+                                    "name": new_name, "pin": new_pin, "role": new_role, 
+                                    "monthly_salary": new_salary, "working_days": new_days, 
+                                    "standard_hours": new_hrs, "security_deposit": new_sd
+                                })
                                 st.success(f"Added {new_name} as {new_role}.")
-                            conn.commit()
-                            conn.close()
                             st.rerun()
                             
             with st.expander("Remove User"):
@@ -641,11 +605,7 @@ with tab_hr:
                         if del_name == st.session_state.hr_name:
                             st.error("You cannot delete your own account while logged in!")
                         else:
-                            conn = sqlite3.connect(DB_NAME)
-                            c = conn.cursor()
-                            c.execute("DELETE FROM users WHERE name=?", (del_name,))
-                            conn.commit()
-                            conn.close()
+                            db.users.delete_one({"name": del_name})
                             st.success(f"Removed user {del_name}")
                             st.rerun()
 
