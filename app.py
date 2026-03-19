@@ -274,14 +274,14 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
         st.error("Working Days and Standard Hours must be greater than 0.")
         return
         
-    total_working_hours = standard_hours_per_day * working_days
-    per_hour_salary = monthly_salary / total_working_hours
+    # 30-Day Fixed Salary Math
+    per_day_salary = monthly_salary / 30.0
     
-    if actual_worked_hours < total_working_hours:
-        missing_hours = total_working_hours - actual_worked_hours
-        leave_deduction = missing_hours * per_hour_salary
-    else:
-        leave_deduction = 0.0
+    # Calculate days present (count only days where work_hours > 0)
+    days_present = df[df['Parsed_Work_Hrs'] > 0]['date_val'].nunique()
+    
+    leave_days = max(0, working_days - days_present)
+    leave_deduction = per_day_salary * leave_days
         
     # Professional Tax (PT) Calculation
     # PT is 200 every month, except February where it is 300
@@ -294,13 +294,10 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
             pt_deduction = 200.0
 
     # Security Deposit Calculation
-    # (Base Security Deposit / Standard Working Days) * Days Present
-    days_present = df['date_val'].nunique()
-    sd_deduction = 0.0
-    if working_days > 0:
-        sd_deduction = (security_deposit / working_days) * days_present
+    # Security Deposit = Base Security Deposit + Leave Penalty
+    sd_deduction = security_deposit + leave_deduction
         
-    total_deductions = leave_deduction + pt_deduction + sd_deduction
+    total_deductions = pt_deduction + sd_deduction
         
     ot_pay = total_ot_hours * 50.0
     final_salary = (monthly_salary - total_deductions) + ot_pay
@@ -309,9 +306,9 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
     with st.container(border=True):
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         with col_m1:
-            st.metric("Leave Deduct.", f"₹ {leave_deduction:,.2f}")
+            st.metric("Leave Penalty (SD)", f"₹ {leave_deduction:,.2f}")
         with col_m2:
-            st.metric("PT + SD Deduct.", f"₹ {(pt_deduction + sd_deduction):,.2f}")
+            st.metric("Total PT + SD", f"₹ {total_deductions:,.2f}")
         with col_m3:
             st.metric("Total OT Pay", f"₹ {ot_pay:,.2f}")
         with col_m4:
@@ -357,12 +354,14 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
         summary_df = pd.DataFrame([{
             "Employee": target_employee,
             "Base Monthly Salary": monthly_salary,
+            "Days Present": days_present,
+            "Leave Days": leave_days,
             "Actual Worked Hours": actual_worked_hours,
             "Total OT Hours": total_ot_hours,
             "Total OT Pay": ot_pay,
-            "Leave Deductions": leave_deduction,
+            "Leave Penalty": leave_deduction,
             "Professional Tax (PT)": pt_deduction,
-            "Security Deposit (SD)": sd_deduction,
+            "Total Sec. Deposit Deducted": sd_deduction,
             "Total Deductions": total_deductions,
             "Final Payable Salary": final_salary
         }])
