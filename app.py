@@ -297,7 +297,8 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
     # Security Deposit = Base Security Deposit + Leave Penalty
     sd_deduction = security_deposit + leave_deduction
         
-    total_deductions = pt_deduction + sd_deduction
+    # Total Deductions = Unpaid Leave + PT + (Base SD + SD Penalty)
+    total_deductions = leave_deduction + pt_deduction + sd_deduction
         
     ot_pay = total_ot_hours * 50.0
     final_salary = (monthly_salary - total_deductions) + ot_pay
