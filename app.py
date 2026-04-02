@@ -278,8 +278,11 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
     per_day_salary = round(monthly_salary / 30.0, 2)
     per_day_sd = round(security_deposit / 30.0, 2)
     
-    # Calculate days present (count only days where work_hours > 0)
-    days_present = df[df['Parsed_Work_Hrs'] > 0]['date_val'].nunique()
+    # Calculate days present (count based on check-in existence rather than parseable hours)
+    if 'check_in' in df.columns:
+        days_present = df[df['check_in'].notna() & (df['check_in'] != '')]['date_val'].nunique()
+    else:
+        days_present = df['date_val'].nunique()
     
     # Calculate Earned Proportions
     earned_salary = round(per_day_salary * days_present, 2)
