@@ -460,59 +460,73 @@ with tab_hr:
                 years = [str(y) for y in range(2024, 2030)]
                 target_year = st.selectbox("Select Year", years, index=years.index(curr_year) if curr_year in years else 1)
             
+            month_index = months.index(target_month) + 1
+            num_days = calendar.monthrange(int(target_year), month_index)[1]
+            all_dates = [f"{target_year}-{month_index:02d}-{day:02d}" for day in range(1, num_days + 1)]
+            all_dates_df = pd.DataFrame({'date_val': all_dates})
+            
             cursor = db.attendance.find({
                 "name": target_employee, 
                 "month_val": target_month, 
                 "year_val": target_year
             }, {"_id": 1, "date_val": 1, "check_in": 1, "check_out": 1, "remark": 1})
             
-            df = pd.DataFrame(list(cursor))
-            if not df.empty:
-                df['_id'] = df['_id'].astype(str)
-            
-            if df.empty:
-                 st.info(f"No attendance records found to process.")
+            db_df = pd.DataFrame(list(cursor))
+            if not db_df.empty:
+                db_df['_id'] = db_df['_id'].astype(str)
+                df = pd.merge(all_dates_df, db_df, on='date_val', how='left')
             else:
-                edited_df = st.data_editor(
-                    df,
-                    column_config={
-                        "_id": None,
-                        "date_val": st.column_config.TextColumn("Date", disabled=True),
-                        "check_in": st.column_config.TextColumn("Check In (HH:MM:SS)"),
-                        "check_out": st.column_config.TextColumn("Check Out (HH:MM:SS)"),
-                        "remark": st.column_config.TextColumn("Remark")
-                    },
-                    hide_index=True,
-                    num_rows="dynamic",
-                    use_container_width=True
-                )
+                df = all_dates_df.copy()
+                df['_id'] = ""
+                df['check_in'] = ""
+                df['check_out'] = ""
+                df['remark'] = ""
                 
-                check1 = df.fillna("").astype(str)
-                check2 = edited_df.fillna("").astype(str)
+            df.fillna("", inplace=True)
+            df.sort_values("date_val", inplace=True)
+            
+            edited_df = st.data_editor(
+                df,
+                column_config={
+                    "_id": None,
+                    "date_val": st.column_config.TextColumn("Date", disabled=True),
+                    "check_in": st.column_config.TextColumn("Check In (HH:MM:SS)"),
+                    "check_out": st.column_config.TextColumn("Check Out (HH:MM:SS)"),
+                    "remark": st.column_config.TextColumn("Remark")
+                },
+                hide_index=True,
+                num_rows="dynamic",
+                use_container_width=True
+            )
+            
+            check1 = df.fillna("").astype(str)
+            check2 = edited_df.fillna("").astype(str)
+            
+            if not check1.equals(check2):
+                from bson.objectid import ObjectId
+                from datetime import datetime as dt
                 
-                if not check1.equals(check2):
-                    from bson.objectid import ObjectId
+                for index, row in edited_df.iterrows():
+                    db_id = str(row.get('_id', '')).strip() if pd.notna(row.get('_id')) else ""
+                    new_ci = str(row.get('check_in', '')).strip() if pd.notna(row.get('check_in')) else ""
+                    new_co = str(row.get('check_out', '')).strip() if pd.notna(row.get('check_out')) else ""
+                    new_remark = str(row.get('remark', '')).strip() if pd.notna(row.get('remark')) else ""
+                    date_val = str(row['date_val'])
                     
-                    for index, row in edited_df.iterrows():
-                        db_id = row.get('_id')
-                        if pd.isna(db_id) or not db_id: continue 
-                        new_ci = str(row['check_in']).strip() if pd.notna(row['check_in']) else ""
-                        new_co = str(row['check_out']).strip() if pd.notna(row['check_out']) else ""
-                        new_remark = str(row['remark']).strip() if pd.notna(row['remark']) else ""
-                        
-                        work_hours = 0.0
-                        if new_ci != "" and new_co != "":
-                            fmt = "%H:%M:%S"
-                            try:
-                                t1 = datetime.strptime(new_ci, fmt)
-                                t2 = datetime.strptime(new_co, fmt)
-                                tdelta = t2 - t1
-                                work_hours = tdelta.total_seconds() / 3600.0
-                                if work_hours < 0:
-                                    work_hours += 24.0
-                            except:
-                                work_hours = 0.0
-                                
+                    work_hours = 0.0
+                    if new_ci != "" and new_co != "":
+                        fmt = "%H:%M:%S"
+                        try:
+                            t1 = datetime.strptime(new_ci, fmt)
+                            t2 = datetime.strptime(new_co, fmt)
+                            tdelta = t2 - t1
+                            work_hours = tdelta.total_seconds() / 3600.0
+                            if work_hours < 0:
+                                work_hours += 24.0
+                        except:
+                            work_hours = 0.0
+                            
+                    if db_id and db_id.lower() != 'nan':
                         db.attendance.update_one(
                             {"_id": ObjectId(db_id)},
                             {"$set": {
@@ -522,29 +536,45 @@ with tab_hr:
                                 "remark": new_remark
                             }}
                         )
-                    
-                    st.toast("Timesheet Auto-Saved!")
-                    st.rerun()
+                    elif new_ci or new_co or new_remark:
+                        try:
+                            day_name = dt.strptime(date_val, "%Y-%m-%d").strftime("%A")
+                        except:
+                            day_name = ""
+                            
+                        db.attendance.insert_one({
+                            "name": target_employee,
+                            "date_val": date_val,
+                            "day_val": day_name,
+                            "month_val": target_month,
+                            "year_val": target_year,
+                            "check_in": new_ci,
+                            "check_out": new_co,
+                            "work_hours": work_hours,
+                            "remark": new_remark
+                        })
+                
+                st.toast("Timesheet Auto-Saved!")
+                st.rerun()
 
-            if not df.empty:
-                full_cursor = db.attendance.find({
-                    "name": target_employee, 
-                    "month_val": target_month, 
-                    "year_val": target_year
-                })
-                full_df = pd.DataFrame(list(full_cursor))
-                if not full_df.empty:
-                    full_df['_id'] = full_df['_id'].astype(str)
-                
-                user_vars = db.users.find_one({"name": target_employee})
-                if not user_vars: 
-                    user_vars = {"monthly_salary": 18000.0, "working_days": 26, "standard_hours": 8.0, "security_deposit": 0.0}
-                monthly_salary = float(user_vars.get("monthly_salary", 18000.0))
-                working_days = int(user_vars.get("working_days", 26))
-                standard_hours_per_day = float(user_vars.get("standard_hours", 8.0))
-                security_deposit = float(user_vars.get("security_deposit", 0.0))
-                
-                render_salary_dashboard(full_df, target_employee, monthly_salary, working_days, standard_hours_per_day, security_deposit)
+            full_cursor = db.attendance.find({
+                "name": target_employee, 
+                "month_val": target_month, 
+                "year_val": target_year
+            })
+            full_df = pd.DataFrame(list(full_cursor))
+            if not full_df.empty:
+                full_df['_id'] = full_df['_id'].astype(str)
+            
+            user_vars = db.users.find_one({"name": target_employee})
+            if not user_vars: 
+                user_vars = {"monthly_salary": 18000.0, "working_days": 26, "standard_hours": 8.0, "security_deposit": 0.0}
+            monthly_salary = float(user_vars.get("monthly_salary", 18000.0))
+            working_days = int(user_vars.get("working_days", 26))
+            standard_hours_per_day = float(user_vars.get("standard_hours", 8.0))
+            security_deposit = float(user_vars.get("security_deposit", 0.0))
+            
+            render_salary_dashboard(full_df, target_employee, monthly_salary, working_days, standard_hours_per_day, security_deposit)
 
         with hr_sub_tabs[1]:
             st.subheader("Manage Staff & PINs")
