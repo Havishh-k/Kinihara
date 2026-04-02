@@ -351,17 +351,44 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_export.to_excel(writer, index=False, sheet_name='Timesheet')
+        # Calculate absent days for the export
+        absent_days = max(0, 30 - days_present)
+        
+        # Fine/Security with KINI = earned_sd (the SD component earned for present days)
+        fine_security_kini = earned_sd
+        
+        # Earn Gross = Earned Salary + OT + Fine/Security
+        earn_gross = round(earned_salary + ot_pay + fine_security_kini, 2)
+        
+        # Total Deduction = Absent penalty (absent_days * per_day_salary) + PT
+        total_deduction = round(pt_deduction, 2)
+        
+        # Net Payable = Earn Gross - Total Deduction = final_salary we already computed
+        net_payable = final_salary
+        
         summary_df = pd.DataFrame([{
-            "Employee": target_employee,
-            "Base Monthly Salary": monthly_salary,
-            "Days Present": days_present,
-            "Earned Basic Pay": earned_salary,
-            "Base SD": security_deposit,
-            "Earned SD": earned_sd,
-            "Total Earned": total_earned,
-            "Professional Tax (PT)": pt_deduction,
-            "Total OT Pay": ot_pay,
-            "Final Payable Salary": final_salary
+            "Sr No": 1,
+            "Employee Name": target_employee,
+            "Male/ Female": "",
+            "Fixed days in Month": 30,
+            "Paid Pay": days_present,
+            "Fixed Salary": monthly_salary,
+            "Basic": monthly_salary,
+            "Fixed Gross": monthly_salary,
+            "Security Deposit": security_deposit,
+            "OT": ot_pay,
+            "Incentive": 0,
+            "Compensation": 0,
+            "Diwali Bon": 0,
+            "Fine/Security with KINI": fine_security_kini,
+            "Earn Gross": earn_gross,
+            "Absent": absent_days,
+            "PT": pt_deduction,
+            "TDS": 0,
+            "Fine": 0,
+            "Total Deduction": total_deduction,
+            "Advance": 0,
+            "Net Payable": net_payable
         }])
         summary_df.to_excel(writer, index=False, sheet_name='Summary')
     
