@@ -316,6 +316,7 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
         
     df['record_date'] = pd.to_datetime(df['date_val'], errors='coerce')
     df['Month '] = df['record_date'].dt.strftime('%B')
+    df['Standard_Hours'] = standard_hours_per_day
         
     export_mapping = {
         'name': 'Name',
@@ -324,8 +325,8 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
         'day_val': 'Day ',
         'check_in': 'Check In',
         'check_out': 'Check Out',
-        'Parsed_Work_Hrs': 'Working Hrs.', 
-        'work_hours': 'Work Hours', 
+        'Standard_Hours': 'Working Hrs.', 
+        'Parsed_Work_Hrs': 'Work Hours', 
         'Parsed_OT_Hrs': 'OT',
         'remark': 'Remark ',
         'absent': 'Absent '
