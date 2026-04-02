@@ -274,17 +274,17 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
         st.error("Working Days and Standard Hours must be greater than 0.")
         return
         
-    # 30-Day Fixed Salary Math
-    per_day_salary = monthly_salary / 30.0
-    per_day_sd = security_deposit / 30.0
+    # 30-Day Fixed Salary Math with 2-Decimal Precision
+    per_day_salary = round(monthly_salary / 30.0, 2)
+    per_day_sd = round(security_deposit / 30.0, 2)
     
     # Calculate days present (count only days where work_hours > 0)
     days_present = df[df['Parsed_Work_Hrs'] > 0]['date_val'].nunique()
     
     # Calculate Earned Proportions
-    earned_salary = per_day_salary * days_present
-    earned_sd = per_day_sd * days_present
-    total_earned = earned_salary + earned_sd
+    earned_salary = round(per_day_salary * days_present, 2)
+    earned_sd = round(per_day_sd * days_present, 2)
+    total_earned = round(earned_salary + earned_sd, 2)
         
     # Professional Tax (PT) Calculation
     # PT is 200 every month, except February where it is 300
@@ -296,8 +296,8 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
         else:
             pt_deduction = 200.0
         
-    ot_pay = total_ot_hours * 50.0
-    final_salary = total_earned - pt_deduction + ot_pay
+    ot_pay = round(total_ot_hours * 50.0, 2)
+    final_salary = round(total_earned - pt_deduction + ot_pay, 2)
     
     # UI Card Wrapper for Metrics
     with st.container(border=True):
