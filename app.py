@@ -281,13 +281,10 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
     # Calculate days present (count only days where work_hours > 0)
     days_present = df[df['Parsed_Work_Hrs'] > 0]['date_val'].nunique()
     
-    leave_days = max(0, working_days - days_present)
-    
-    salary_leave_deduction = per_day_salary * leave_days
-    sd_leave_deduction = per_day_sd * leave_days
-    
-    adjusted_salary = monthly_salary - salary_leave_deduction
-    adjusted_sd = security_deposit - sd_leave_deduction
+    # Calculate Earned Proportions
+    earned_salary = per_day_salary * days_present
+    earned_sd = per_day_sd * days_present
+    total_earned = earned_salary + earned_sd
         
     # Professional Tax (PT) Calculation
     # PT is 200 every month, except February where it is 300
@@ -299,20 +296,18 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
         else:
             pt_deduction = 200.0
         
-    total_deductions_from_salary = pt_deduction + adjusted_sd
-        
     ot_pay = total_ot_hours * 50.0
-    final_salary = adjusted_salary - total_deductions_from_salary + ot_pay
+    final_salary = total_earned - pt_deduction + ot_pay
     
     # UI Card Wrapper for Metrics
     with st.container(border=True):
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         with col_m1:
-            st.metric("Salary Leave Penalty", f"₹ {salary_leave_deduction:,.2f}")
+            st.metric("Earned Basic Pay", f"₹ {earned_salary:,.2f}")
         with col_m2:
-            st.metric("Total PT + Adj. SD", f"₹ {total_deductions_from_salary:,.2f}")
+            st.metric("Earned Sec. Deposit", f"₹ {earned_sd:,.2f}")
         with col_m3:
-            st.metric("Total OT Pay", f"₹ {ot_pay:,.2f}")
+            st.metric("PT Deduction", f"₹ {-pt_deduction:,.2f}")
         with col_m4:
             st.metric("Final Payable", f"₹ {final_salary:,.2f}")
         
@@ -357,11 +352,10 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
             "Employee": target_employee,
             "Base Monthly Salary": monthly_salary,
             "Days Present": days_present,
-            "Leave Days": leave_days,
-            "Salary Leave Penalty": salary_leave_deduction,
+            "Earned Basic Pay": earned_salary,
             "Base SD": security_deposit,
-            "SD Leave Penalty": sd_leave_deduction,
-            "Adjusted SD Deducted": adjusted_sd,
+            "Earned SD": earned_sd,
+            "Total Earned": total_earned,
             "Professional Tax (PT)": pt_deduction,
             "Total OT Pay": ot_pay,
             "Final Payable Salary": final_salary
