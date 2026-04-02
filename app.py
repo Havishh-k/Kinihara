@@ -245,7 +245,8 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
     if working_col not in df.columns: df[working_col] = 0.0
     if ot_col not in df.columns: df[ot_col] = 0.0
     
-    df.fillna(0, inplace=True)
+    df[working_col] = df[working_col].fillna(0.0)
+    df[ot_col] = df[ot_col].fillna(0.0)
     
     def parse_hours(val):
         if pd.isna(val) or val == 0: return 0.0
