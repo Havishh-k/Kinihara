@@ -47,7 +47,7 @@ def check_pin(name, pin):
 # ==========================================
 # 2. Page Configuration & Setup
 # ==========================================
-st.set_page_config(page_title="Salary Calculator Portal", page_icon=":material/account_balance_wallet:", layout="centered")
+st.set_page_config(page_title="Salary Calculator Portal", page_icon=":material/account_balance_wallet:", layout="wide")
 
 st.markdown("""
 <style>
@@ -56,12 +56,24 @@ st.markdown("""
     html, body, [class*="css"] {
         font-family: 'Outfit', sans-serif !important;
     }
+
+    .stApp {
+        background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 45%, #f8fafc 100%);
+    }
     
-    /* Center aligning main block like a standard SaaS website */
+    /* Comfortable app width and spacing */
     .block-container {
-        padding-top: 1rem !important;
-        padding-bottom: 3rem !important;
-        max-width: 800px;
+        padding-top: 1.2rem !important;
+        padding-bottom: 2.5rem !important;
+        max-width: 1200px;
+    }
+
+    h1, h2, h3 {
+        letter-spacing: -0.015em;
+    }
+
+    h1 {
+        font-weight: 650 !important;
     }
     
     /* Make Metric container stack nicely on very small screens */
@@ -78,37 +90,71 @@ st.markdown("""
     }
     
     .stTabs [data-baseweb="tab"] {
-        border-radius: 8px;
-        padding: 10px 24px;
-        font-weight: 500;
-        background-color: transparent;
-        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 10px 20px;
+        font-weight: 550;
+        background-color: #ffffff;
+        border: 1px solid #dbe4ff;
     }
     
     .stTabs [aria-selected="true"] {
-        background-color: #f1f5f9;
-        border-bottom-color: transparent;
+        background-color: #eef2ff;
+        border-color: #c7d2fe;
+        color: #1e1b4b;
     }
 
-    /* Beautifying Metric Cards */
+    /* Metric emphasis */
     div[data-testid="stMetricValue"] {
         font-size: 2.2rem;
         font-weight: 600;
+        color: #0f172a;
     }
     
     div[data-testid="stMetricLabel"] {
         font-size: 1.05rem;
         font-weight: 500;
-        opacity: 0.85;
+        opacity: 0.9;
     }
     
-    /* Rounded Inputs & Buttons */
+    /* Rounded and clean controls */
     div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
-        border-radius: 8px;
+        border-radius: 10px;
+        border-color: #cbd5e1 !important;
+        background-color: #ffffff;
     }
     
-    button {
-        border-radius: 8px !important;
+    .stButton > button {
+        border-radius: 10px !important;
+        font-weight: 550 !important;
+        border: 1px solid #cbd5e1 !important;
+    }
+
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(90deg, #4f46e5 0%, #6366f1 100%) !important;
+        border: none !important;
+    }
+
+    .stButton > button:hover {
+        transform: translateY(-1px);
+        transition: 0.2s ease;
+    }
+
+    /* Data editor readability */
+    [data-testid="stDataFrame"] {
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        overflow: hidden;
+    }
+
+    /* Sidebar polish */
+    section[data-testid="stSidebar"] {
+        border-right: 1px solid #e2e8f0;
+        background-color: #f8fafc;
+    }
+
+    /* Alerts */
+    div[data-baseweb="notification"] {
+        border-radius: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -119,6 +165,7 @@ if "hr_name" not in st.session_state:
     st.session_state.hr_name = ""
 
 st.title(":material/account_balance_wallet: Dual-Interface Salary Portal")
+st.caption("Attendance tracking and salary processing in one streamlined workspace.")
 
 tab_staff, tab_hr = st.tabs([":material/badge: Staff Portal", ":material/admin_panel_settings: HR Portal"])
 
@@ -237,7 +284,7 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
         st.info(f"No attendance records found to process.")
         return
 
-    st.success(f"Processing {len(df)} records for {target_employee}.")
+    st.info(f"Processing {len(df)} records for {target_employee}.")
     
     working_col = 'work_hours' if 'work_hours' in df.columns else 'Worked_Hours'
     ot_col = 'ot_hours' if 'ot_hours' in df.columns else 'OT_Hours'
@@ -305,6 +352,7 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
     
     # UI Card Wrapper for Metrics
     with st.container(border=True):
+        st.markdown("#### Salary Snapshot")
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         with col_m1:
             st.metric("Earned Basic Pay", f"₹ {earned_salary:,.2f}")
@@ -347,8 +395,9 @@ def render_salary_dashboard(df, target_employee, monthly_salary, working_days, s
             
     df_export = df_mapped[exact_columns]
     
-    st.markdown("### Export Preview")
-    st.dataframe(df_export, use_container_width=True)
+    with st.container(border=True):
+        st.markdown("### Export Preview")
+        st.dataframe(df_export, use_container_width=True)
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -442,25 +491,27 @@ with tab_hr:
             
         st.sidebar.divider()
         st.header(":material/dashboard: HR Management Dashboard")
+        st.caption("Use the tabs below to manage payroll, users, and manual file calculations.")
 
         hr_sub_tabs = st.tabs([":material/analytics: Salary Calculations", ":material/groups: Staff Management", ":material/folder_open: Manual Overrides"])
         
         with hr_sub_tabs[0]:
             st.subheader("Live Employee Calculations")
             st.markdown("Edit Check In/Out fields below to correct mistakes. Click **Save Edits** to recalculate.")
-            target_employee = st.selectbox("Select Employee to Calculate", staff_names)
-            
-            ist = pytz.timezone('Asia/Kolkata')
-            curr_month = datetime.now(ist).strftime("%B")
-            curr_year = datetime.now(ist).strftime("%Y")
-            months = list(calendar.month_name)[1:]
-            
-            col_f1, col_f2 = st.columns(2)
-            with col_f1: 
-                target_month = st.selectbox("Select Month", months, index=months.index(curr_month) if curr_month in months else 0)
-            with col_f2: 
-                years = [str(y) for y in range(2024, 2030)]
-                target_year = st.selectbox("Select Year", years, index=years.index(curr_year) if curr_year in years else 1)
+            with st.container(border=True):
+                target_employee = st.selectbox("Select Employee to Calculate", staff_names)
+                
+                ist = pytz.timezone('Asia/Kolkata')
+                curr_month = datetime.now(ist).strftime("%B")
+                curr_year = datetime.now(ist).strftime("%Y")
+                months = list(calendar.month_name)[1:]
+                
+                col_f1, col_f2 = st.columns(2)
+                with col_f1: 
+                    target_month = st.selectbox("Select Month", months, index=months.index(curr_month) if curr_month in months else 0)
+                with col_f2: 
+                    years = [str(y) for y in range(2024, 2030)]
+                    target_year = st.selectbox("Select Year", years, index=years.index(curr_year) if curr_year in years else 1)
             
             month_index = months.index(target_month) + 1
             num_days = calendar.monthrange(int(target_year), month_index)[1]
@@ -487,19 +538,20 @@ with tab_hr:
             df.fillna("", inplace=True)
             df.sort_values("date_val", inplace=True)
             
-            edited_df = st.data_editor(
-                df,
-                column_config={
-                    "_id": None,
-                    "date_val": st.column_config.TextColumn("Date", disabled=True),
-                    "check_in": st.column_config.TextColumn("Check In (HH:MM:SS)"),
-                    "check_out": st.column_config.TextColumn("Check Out (HH:MM:SS)"),
-                    "remark": st.column_config.TextColumn("Remark")
-                },
-                hide_index=True,
-                num_rows="dynamic",
-                use_container_width=True
-            )
+            with st.container(border=True):
+                edited_df = st.data_editor(
+                    df,
+                    column_config={
+                        "_id": None,
+                        "date_val": st.column_config.TextColumn("Date", disabled=True),
+                        "check_in": st.column_config.TextColumn("Check In (HH:MM:SS)"),
+                        "check_out": st.column_config.TextColumn("Check Out (HH:MM:SS)"),
+                        "remark": st.column_config.TextColumn("Remark")
+                    },
+                    hide_index=True,
+                    num_rows="dynamic",
+                    use_container_width=True
+                )
             
             check1 = df.fillna("").astype(str)
             check2 = edited_df.fillna("").astype(str)
@@ -584,12 +636,13 @@ with tab_hr:
             st.markdown("#### Individual Staff Data")
             st.markdown("Edit fields directly in the table below. Changes auto-save instantly.")
             users_df = get_users()
-            edited_users = st.data_editor(
-                users_df, 
-                use_container_width=True, 
-                hide_index=True,
-                disabled=["name"] # Prevent changing primary keys directly
-            )
+            with st.container(border=True):
+                edited_users = st.data_editor(
+                    users_df, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    disabled=["name"] # Prevent changing primary keys directly
+                )
             
             check1 = users_df.fillna("").astype(str)
             check2 = edited_users.fillna("").astype(str)
@@ -668,7 +721,8 @@ with tab_hr:
         with hr_sub_tabs[2]:
             st.subheader("Manual Timesheet Override")
             st.markdown("Run calculations securely on external files without updating the live database.")
-            uploaded_file = st.file_uploader("Upload External Timesheet", type=["csv", "xlsx"])
+            with st.container(border=True):
+                uploaded_file = st.file_uploader("Upload External Timesheet", type=["csv", "xlsx"])
             if uploaded_file is not None:
                 try:
                     if uploaded_file.name.endswith('.csv'):
